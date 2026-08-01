@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Brew Log">
 <meta name="theme-color" content="#121620">
 <!-- deploy.sh がデプロイ日時を焼き込む。curl して公開版の鮮度を確認するための印。 -->
-<meta name="app-version" content="2026-08-01 12:32">
+<meta name="app-version" content="2026-08-01 13:07">
 <style>
   :root {
     --bg-color: #121620;
@@ -580,7 +580,7 @@ const LS_KEYS = { brew: 'bl_brewLogs', latte: 'bl_latteArts', cafe: 'bl_cafeNote
    空文字のままなら AI ボタンは表示されず、従来の端末内分析だけで動く。
    例: 'https://brew-log-api.<サブドメイン>.workers.dev'
 ----------------------------------------------------------- */
-const AI_API_BASE = '';
+const AI_API_BASE = 'https://brew-log-api.cafe-hitsuji.workers.dev';
 
 function loadData(key) {
   try { return JSON.parse(localStorage.getItem(key)) || []; }
