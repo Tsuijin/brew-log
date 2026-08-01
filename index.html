@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Brew Log">
 <meta name="theme-color" content="#121620">
 <!-- deploy.sh がデプロイ日時を焼き込む。curl して公開版の鮮度を確認するための印。 -->
-<meta name="app-version" content="2026-08-01 13:07">
+<meta name="app-version" content="2026-08-01 14:05">
 <style>
   :root {
     --bg-color: #121620;
@@ -135,6 +135,23 @@
     flex-shrink:0;
   }
   .del-btn:active { color: var(--danger); }
+  .card-actions { display: flex; gap: 2px; flex-shrink: 0; }
+
+  /* 豆情報を持つログのタイトルはタップで詳細が開く */
+  .card-title.linked {
+    color: var(--accent-color-strong); cursor: pointer;
+    text-decoration: underline dotted rgba(228,180,131,0.45); text-underline-offset: 3px;
+  }
+
+  /* 焙煎度スライダーの目盛り */
+  .roast-scale { display: flex; margin-top: 6px; }
+  .roast-scale span { flex: 1; text-align: center; font-size: 10px; color: var(--sub-text); }
+  .roast-scale span.on { color: var(--accent-color); font-weight: 700; }
+
+  /* 豆情報の定義リスト */
+  .bean-spec { display: grid; grid-template-columns: 82px 1fr; gap: 7px 10px; font-size: 13.5px; margin-top: 4px; }
+  .bean-spec dt { color: var(--sub-text); font-size: 11.5px; padding-top: 2px; }
+  .bean-spec dd { color: var(--text-color); word-break: break-word; }
 
   .badge {
     display: inline-block;
@@ -360,12 +377,14 @@
 
 <div class="app-container">
   <datalist id="beanDatalist"></datalist>
+  <datalist id="shopDatalist"></datalist>
 
   <header>
     <div>
       <h1><span class="hicon">☕</span>Brew Log</h1>
     </div>
     <div class="header-btn-group">
+      <button class="header-icon-btn" id="headerBeanBtn" onclick="openBeanListModal()" style="display:none;">🫘</button>
       <button class="header-icon-btn" id="headerAnalysisBtn" onclick="openAnalysisModal()" style="display:none;">📊</button>
       <button class="header-icon-btn" id="headerSearchBtn" onclick="openSearchModal()" style="display:none;">🔍<span class="dot"></span></button>
     </div>
@@ -452,6 +471,43 @@
       <button class="modal-close" onclick="closeModal('modalBrewForm')">×</button>
     </div>
     <div id="brewFormBody"></div>
+  </div>
+</div>
+
+<!-- ========= モーダル: 豆の一覧 ========= -->
+<div class="modal-overlay" id="modalBeanList">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">豆の管理</div>
+      <button class="modal-close" onclick="closeModal('modalBeanList')">×</button>
+    </div>
+    <button class="add-btn" onclick="startBeanForm()">＋ 新しい豆を登録</button>
+    <div id="beanList"></div>
+  </div>
+</div>
+
+<!-- ========= モーダル: 豆の登録・編集フォーム ========= -->
+<div class="modal-overlay" id="modalBeanForm">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="beanFormTitle">豆を登録</div>
+      <button class="modal-close" onclick="closeModal('modalBeanForm')">×</button>
+    </div>
+    <div id="beanFormBody"></div>
+  </div>
+</div>
+
+<!-- ========= モーダル: 豆情報の表示 ========= -->
+<div class="modal-overlay" id="modalBeanInfo">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">豆の情報</div>
+      <button class="modal-close" onclick="closeModal('modalBeanInfo')">×</button>
+    </div>
+    <div id="beanInfoBody"></div>
   </div>
 </div>
 
@@ -572,7 +628,7 @@
 /* =========================================================
    共通ユーティリティ
 ========================================================= */
-const LS_KEYS = { brew: 'bl_brewLogs', latte: 'bl_latteArts', cafe: 'bl_cafeNotes', aiCache: 'bl_aiCache' };
+const LS_KEYS = { brew: 'bl_brewLogs', latte: 'bl_latteArts', cafe: 'bl_cafeNotes', aiCache: 'bl_aiCache', bean: 'bl_beans' };
 
 /* -----------------------------------------------------------
    AIアドバイス連携の設定
@@ -591,6 +647,7 @@ function saveData(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
 let brewLogs = loadData(LS_KEYS.brew);
 let latteArts = loadData(LS_KEYS.latte);
 let cafeNotes = loadData(LS_KEYS.cafe);
+let beans = loadData(LS_KEYS.bean);
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
@@ -639,6 +696,7 @@ function switchTab(name) {
   document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.getElementById('headerSearchBtn').style.display = (name === 'brew') ? 'flex' : 'none';
   document.getElementById('headerAnalysisBtn').style.display = (name === 'brew') ? 'flex' : 'none';
+  document.getElementById('headerBeanBtn').style.display = (name === 'brew') ? 'flex' : 'none';
   if (name === 'brew') renderBrewList();
   if (name === 'recipe') renderRecipeList();
   if (name === 'latte') renderLatteList();
@@ -649,18 +707,266 @@ function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 /* =========================================================
+   豆（Bean）
+   ログ側は beanId で豆を参照しつつ、表示名 beanName も持たせている。
+   beanName を持たせるのは、豆マスタが無い旧ログや、豆を消したあとのログでも
+   集計（MYレシピ・分析・検索）がそのまま動くようにするため。
+   豆を編集したら、参照しているログの beanName を貼り直す（syncLogBeanNames）。
+========================================================= */
+const ROAST_LEVELS = ['浅煎り', '中煎り', '中深煎り', '深煎り', '極深煎り'];
+
+/** 豆の表示名。「銘柄名(生産国) - 購入店」。無い項目は省略する。 */
+function beanLabel(bean) {
+  if (!bean) return '';
+  const origin = bean.origin ? `(${bean.origin})` : '';
+  const shop = bean.shop ? ` - ${bean.shop}` : '';
+  return `${bean.name}${origin}${shop}`;
+}
+function findBean(id) { return beans.find(b => b.id === id) || null; }
+
+/** ログのタイトルに出す名前。豆マスタがあればそちらを正とする。 */
+function logBeanLabel(log) {
+  const bean = log.beanId ? findBean(log.beanId) : null;
+  return bean ? beanLabel(bean) : (log.beanName || '');
+}
+
+function openBeanListModal() {
+  renderBeanList();
+  openModal('modalBeanList');
+}
+
+function renderBeanList() {
+  const wrap = document.getElementById('beanList');
+  if (!beans.length) {
+    wrap.innerHTML = `<div class="empty-state"><span class="e-icon">🫘</span>まだ豆が登録されていません<br>購入した豆を登録すると、記録がラクになります</div>`;
+    return;
+  }
+  wrap.innerHTML = beans.map(b => `
+    <div class="card">
+      <div class="card-top">
+        <div>
+          <div class="card-title">🫘 ${escapeHtml(beanLabel(b))}</div>
+          <div class="card-date">記録${brewLogs.filter(l => l.beanId === b.id).length}件</div>
+        </div>
+        <div class="card-actions">
+          <button class="del-btn" onclick="startBeanForm('${b.id}')">✏️</button>
+          <button class="del-btn" onclick="deleteBean('${b.id}')">×</button>
+        </div>
+      </div>
+      ${b.roastLevel !== undefined && b.roastLevel !== '' ? `<span class="badge">${ROAST_LEVELS[Number(b.roastLevel)]}</span>` : ''}
+      ${beanSpecHtml(b)}
+    </div>
+  `).join('');
+}
+
+function beanSpecHtml(b) {
+  const rows = [
+    ['購入店', b.shop],
+    ['銘柄名', b.name],
+    ['生産国', b.origin],
+    ['農園', b.farm],
+    ['品種', b.variety],
+    ['精製方法', b.process],
+    ['焙煎度', (b.roastLevel !== undefined && b.roastLevel !== '') ? ROAST_LEVELS[Number(b.roastLevel)] : ''],
+    ['焙煎日', b.roastDate ? formatDate(b.roastDate) : ''],
+    ['購入日', b.buyDate ? formatDate(b.buyDate) : ''],
+  ].filter(([, v]) => v);
+  if (!rows.length) return '';
+  return `<dl class="bean-spec">${rows.map(([k, v]) =>
+    `<dt>${k}</dt><dd>${escapeHtml(v)}</dd>`).join('')}</dl>`;
+}
+
+let editingBeanId = null;
+
+function startBeanForm(id) {
+  editingBeanId = id || null;
+  const b = id ? findBean(id) : null;
+  document.getElementById('beanFormTitle').textContent = b ? '豆を編集' : '豆を登録';
+  document.getElementById('beanFormBody').innerHTML = buildBeanFormHtml(b);
+  updateShopDatalist();
+  renderRoastScale();
+  openModal('modalBeanForm');
+}
+
+function buildBeanFormHtml(b) {
+  const v = (key) => escapeHtml(b && b[key] !== undefined ? b[key] : '');
+  const roast = (b && b.roastLevel !== undefined && b.roastLevel !== '') ? Number(b.roastLevel) : 1;
+  return `
+    <div class="form-group">
+      <label class="form-label">購入店（過去の入力から選択 or 直接入力）</label>
+      <input type="text" id="b_shop" list="shopDatalist" value="${v('shop')}" placeholder="例）〇〇ロースタリー">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">銘柄名</label>
+        <input type="text" id="b_name" value="${v('name')}" placeholder="例）イルガチェフェ">
+      </div>
+      <div class="form-group">
+        <label class="form-label">生産国</label>
+        <input type="text" id="b_origin" value="${v('origin')}" placeholder="例）エチオピア">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">農園</label>
+        <input type="text" id="b_farm" value="${v('farm')}" placeholder="例）コンガ農協">
+      </div>
+      <div class="form-group">
+        <label class="form-label">品種</label>
+        <input type="text" id="b_variety" value="${v('variety')}" placeholder="例）ヒブリド・ティピカ">
+      </div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">精製方法</label>
+      <input type="text" id="b_process" value="${v('process')}" placeholder="例）ウォッシュド / ナチュラル">
+    </div>
+    <div class="form-group">
+      <label class="form-label">焙煎度</label>
+      <input type="range" min="0" max="4" step="1" value="${roast}" id="b_roastLevel" oninput="renderRoastScale()">
+      <div class="roast-scale" id="roastScale"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label class="form-label">焙煎日</label>
+        <input type="date" id="b_roastDate" value="${v('roastDate')}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">購入日</label>
+        <input type="date" id="b_buyDate" value="${v('buyDate')}">
+      </div>
+    </div>
+    <button class="save-btn" onclick="saveBean()">保存する</button>
+  `;
+}
+
+function renderRoastScale() {
+  const slider = document.getElementById('b_roastLevel');
+  const scale = document.getElementById('roastScale');
+  if (!slider || !scale) return;
+  const cur = Number(slider.value);
+  scale.innerHTML = ROAST_LEVELS.map((label, i) =>
+    `<span class="${i === cur ? 'on' : ''}">${label}</span>`).join('');
+}
+
+function updateShopDatalist() {
+  const shops = Array.from(new Set(beans.map(b => b.shop).filter(Boolean)));
+  document.getElementById('shopDatalist').innerHTML =
+    shops.map(s => `<option value="${escapeHtml(s)}">`).join('');
+}
+
+function saveBean() {
+  const name = document.getElementById('b_name').value.trim();
+  if (!name) { alert('銘柄名を入力してください'); return; }
+
+  const data = {
+    shop: document.getElementById('b_shop').value.trim(),
+    name,
+    origin: document.getElementById('b_origin').value.trim(),
+    farm: document.getElementById('b_farm').value.trim(),
+    variety: document.getElementById('b_variety').value.trim(),
+    process: document.getElementById('b_process').value.trim(),
+    roastLevel: document.getElementById('b_roastLevel').value,
+    roastDate: document.getElementById('b_roastDate').value,
+    buyDate: document.getElementById('b_buyDate').value,
+  };
+
+  let savedId;
+  if (editingBeanId) {
+    savedId = editingBeanId;
+    const idx = beans.findIndex(b => b.id === savedId);
+    if (idx >= 0) beans[idx] = { ...beans[idx], ...data };
+  } else {
+    savedId = uid();
+    beans.unshift({ id: savedId, ...data });
+  }
+  saveData(LS_KEYS.bean, beans);
+
+  // 豆名が変わっている可能性があるので、参照しているログの表示名を貼り直す
+  syncLogBeanNames();
+
+  editingBeanId = null;
+  closeModal('modalBeanForm');
+  renderBeanList();
+  updateBeanDatalist();
+  renderBrewList();
+
+  // 記録フォームから登録した場合は、いま作った豆をそのまま選択状態にする
+  const sel = document.getElementById('f_beanSelect');
+  if (sel && document.getElementById('modalBrewForm').classList.contains('open')) {
+    lastBeanSelectValue = 'id:' + savedId;
+    sel.innerHTML = beanOptionsHtml(lastBeanSelectValue);
+  }
+}
+
+function deleteBean(id) {
+  const used = brewLogs.filter(l => l.beanId === id).length;
+  const msg = used
+    ? `この豆を削除しますか？\n抽出ログ${used}件は残りますが、豆情報は見られなくなります。`
+    : 'この豆を削除しますか？';
+  if (!confirm(msg)) return;
+  beans = beans.filter(b => b.id !== id);
+  saveData(LS_KEYS.bean, beans);
+  // ログ側の beanName は残したまま、リンクだけ切る
+  brewLogs.forEach(l => { if (l.beanId === id) delete l.beanId; });
+  saveData(LS_KEYS.brew, brewLogs);
+  renderBeanList();
+  updateBeanDatalist();
+  renderBrewList();
+}
+
+/** 豆マスタの表示名を、参照しているログの beanName に反映する */
+function syncLogBeanNames() {
+  let changed = false;
+  brewLogs.forEach(log => {
+    if (!log.beanId) return;
+    const label = beanLabel(findBean(log.beanId));
+    if (label && log.beanName !== label) { log.beanName = label; changed = true; }
+  });
+  if (changed) saveData(LS_KEYS.brew, brewLogs);
+}
+
+function openBeanInfo(beanId) {
+  const b = findBean(beanId);
+  if (!b) return;
+  document.getElementById('beanInfoBody').innerHTML = `
+    <div class="card-title" style="margin-bottom:4px;">🫘 ${escapeHtml(beanLabel(b))}</div>
+    ${beanSpecHtml(b)}
+    <button class="save-btn" onclick="closeModal('modalBeanInfo'); startBeanForm('${b.id}')">この豆を編集</button>
+  `;
+  openModal('modalBeanInfo');
+}
+
+/* =========================================================
    抽出ログ（Brew Log）
 ========================================================= */
 function openMethodModal() { openModal('modalMethod'); }
 
 let currentMethod = 'drip';
+let editingLogId = null;
 
+const METHOD_LABELS = { drip: 'ペーパードリップ', espresso: 'エスプレッソ', frenchpress: 'フレンチプレス' };
+
+/** 新規記録。method 選択モーダルから呼ばれる。 */
 function startBrewForm(method) {
-  currentMethod = method;
+  openBrewForm(method, null);
   closeModal('modalMethod');
-  const titleMap = { drip: 'ペーパードリップ', espresso: 'エスプレッソ', frenchpress: 'フレンチプレス' };
-  document.getElementById('brewFormTitle').textContent = titleMap[method] + 'の記録';
-  document.getElementById('brewFormBody').innerHTML = buildBrewFormHtml(method);
+}
+
+/** 過去ログの編集。 */
+function editBrewLog(id) {
+  const log = brewLogs.find(l => l.id === id);
+  if (!log) return;
+  openBrewForm(log.method, log);
+}
+
+function openBrewForm(method, log) {
+  currentMethod = method;
+  editingLogId = log ? log.id : null;
+  document.getElementById('brewFormTitle').textContent =
+    METHOD_LABELS[method] + (log ? 'の記録を編集' : 'の記録');
+  document.getElementById('brewFormBody').innerHTML = buildBrewFormHtml(method, log);
+  overallRating.value = log ? Number(log.rating || 0) : 0;
+  initStarInput('overallStars', overallRating);
   openModal('modalBrewForm');
 }
 
@@ -669,54 +975,92 @@ function updateBeanDatalist() {
   document.getElementById('beanDatalist').innerHTML = uniqueNames.map(name => `<option value="${escapeHtml(name)}">`).join('');
 }
 
-function buildBrewFormHtml(method) {
+/**
+ * 豆セレクトの選択肢。値は "id:<豆ID>" か "name:<表示名>"。
+ * 豆マスタに無い過去ログの豆名も選べるようにしておく（旧データ救済）。
+ */
+function beanOptionsHtml(selected) {
+  const registered = beans.map(b => ({ value: 'id:' + b.id, label: beanLabel(b) }));
+  const legacyNames = Array.from(new Set(
+    brewLogs.filter(l => !l.beanId && l.beanName).map(l => l.beanName)
+  ));
+  const legacy = legacyNames.map(n => ({ value: 'name:' + n, label: n }));
+
+  const group = (label, items) => items.length
+    ? `<optgroup label="${label}">${items.map(o =>
+        `<option value="${escapeHtml(o.value)}"${o.value === selected ? ' selected' : ''}>${escapeHtml(o.label)}</option>`
+      ).join('')}</optgroup>`
+    : '';
+
+  return `<option value=""${selected ? '' : ' selected'}>選択してください</option>`
+    + group('登録した豆', registered)
+    + group('過去の入力', legacy)
+    + `<option value="__new__">＋ 新しい豆を登録…</option>`;
+}
+
+/** 「＋ 新しい豆を登録…」を選んだら豆フォームを開き、選択は元に戻す */
+let lastBeanSelectValue = '';
+function onBeanSelectChange(sel) {
+  if (sel.value === '__new__') {
+    sel.value = lastBeanSelectValue;
+    startBeanForm();
+    return;
+  }
+  lastBeanSelectValue = sel.value;
+}
+
+function buildBrewFormHtml(method, log) {
+  // 編集時は既存値、新規時は空。数値も文字列として扱う（そのまま value に入れる）
+  const v = (key) => escapeHtml(log && log[key] !== undefined && log[key] !== null ? log[key] : '');
+  const range = (key) => (log && log[key] !== undefined && log[key] !== '') ? Number(log[key]) : 5;
+
   let methodFields = '';
   if (method === 'drip') {
     methodFields = `
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">湯温 (℃)</label>
-          <input type="number" inputmode="decimal" id="f_waterTemp" placeholder="92">
+          <input type="number" inputmode="decimal" id="f_waterTemp" value="${v('waterTemp')}" placeholder="92">
         </div>
         <div class="form-group">
           <label class="form-label">挽き目</label>
-          <input type="text" inputmode="decimal" id="f_grind" placeholder="中細 / 4.0など">
+          <input type="text" inputmode="decimal" id="f_grind" value="${v('grind')}" placeholder="中細 / 4.0など">
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">湯量 (g)</label>
-          <input type="number" inputmode="decimal" id="f_waterAmount" placeholder="230">
+          <input type="number" inputmode="decimal" id="f_waterAmount" value="${v('waterAmount')}" placeholder="230">
         </div>
         <div class="form-group">
           <label class="form-label">抽出時間（分:秒）</label>
-          <input type="text" inputmode="numeric" id="f_time" placeholder="2:30">
+          <input type="text" inputmode="numeric" id="f_time" value="${v('time')}" placeholder="2:30">
         </div>
       </div>`;
   } else if (method === 'espresso') {
+    const temp = (log && log.waterTemp) ? log.waterTemp : '中';
     methodFields = `
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">湯温</label>
           <select id="f_waterTemp">
-            <option value="低">低</option>
-            <option value="中" selected>中</option>
-            <option value="高">高</option>
+            ${['低', '中', '高'].map(t =>
+              `<option value="${t}"${t === temp ? ' selected' : ''}>${t}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
           <label class="form-label">挽き目</label>
-          <input type="text" inputmode="decimal" id="f_grind" placeholder="細挽き / 2.0など">
+          <input type="text" inputmode="decimal" id="f_grind" value="${v('grind')}" placeholder="細挽き / 2.0など">
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">抽出量 / Yield (g)</label>
-          <input type="number" inputmode="decimal" id="f_yield" placeholder="36">
+          <input type="number" inputmode="decimal" id="f_yield" value="${v('yield')}" placeholder="36">
         </div>
         <div class="form-group">
           <label class="form-label">抽出時間 (秒)</label>
-          <input type="number" inputmode="decimal" id="f_time" placeholder="27">
+          <input type="number" inputmode="decimal" id="f_time" value="${v('time')}" placeholder="27">
         </div>
       </div>`;
   } else if (method === 'frenchpress') {
@@ -724,37 +1068,40 @@ function buildBrewFormHtml(method) {
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">湯温 (℃)</label>
-          <input type="number" inputmode="decimal" id="f_waterTemp" placeholder="94">
+          <input type="number" inputmode="decimal" id="f_waterTemp" value="${v('waterTemp')}" placeholder="94">
         </div>
         <div class="form-group">
           <label class="form-label">挽き目</label>
-          <input type="text" inputmode="decimal" id="f_grind" placeholder="粗挽き / 6.0など">
+          <input type="text" inputmode="decimal" id="f_grind" value="${v('grind')}" placeholder="粗挽き / 6.0など">
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">湯量 (g)</label>
-          <input type="number" inputmode="decimal" id="f_waterAmount" placeholder="300">
+          <input type="number" inputmode="decimal" id="f_waterAmount" value="${v('waterAmount')}" placeholder="300">
         </div>
         <div class="form-group">
           <label class="form-label">浸漬時間（分:秒）</label>
-          <input type="text" inputmode="numeric" id="f_time" placeholder="4:00">
+          <input type="text" inputmode="numeric" id="f_time" value="${v('time')}" placeholder="4:00">
         </div>
       </div>`;
   }
 
+  const selectedBean = log ? (log.beanId ? 'id:' + log.beanId : (log.beanName ? 'name:' + log.beanName : '')) : '';
+  lastBeanSelectValue = selectedBean;
+
   return `
     <div class="form-group">
       <label class="form-label">日時</label>
-      <input type="datetime-local" id="f_datetime" value="${nowLocalDatetime()}">
+      <input type="datetime-local" id="f_datetime" value="${log && log.datetime ? escapeHtml(log.datetime) : nowLocalDatetime()}">
     </div>
     <div class="form-group bean-select-wrap">
-      <label class="form-label">豆（過去の入力から選択 or 直接入力）</label>
-      <input type="text" id="f_beanName" list="beanDatalist" placeholder="豆の名前を入力 or 選択">
+      <label class="form-label">豆</label>
+      <select id="f_beanSelect" onchange="onBeanSelectChange(this)">${beanOptionsHtml(selectedBean)}</select>
     </div>
     <div class="form-group">
       <label class="form-label">粉量 (g)</label>
-      <input type="number" inputmode="decimal" id="f_dose" placeholder="15">
+      <input type="number" inputmode="decimal" id="f_dose" value="${v('dose')}" placeholder="15">
     </div>
 
     ${methodFields}
@@ -767,30 +1114,30 @@ function buildBrewFormHtml(method) {
     <div class="form-group">
       <label class="form-label">出来栄え&フィードバック</label>
       <div class="range-group">
-        <div class="range-top"><span>酸味</span><b id="v_acidity">5</b></div>
-        <input type="range" min="1" max="10" value="5" id="r_acidity" oninput="document.getElementById('v_acidity').textContent=this.value">
+        <div class="range-top"><span>酸味</span><b id="v_acidity">${range('acidity')}</b></div>
+        <input type="range" min="1" max="10" value="${range('acidity')}" id="r_acidity" oninput="document.getElementById('v_acidity').textContent=this.value">
       </div>
       <div class="range-group">
-        <div class="range-top"><span>苦味</span><b id="v_bitterness">5</b></div>
-        <input type="range" min="1" max="10" value="5" id="r_bitterness" oninput="document.getElementById('v_bitterness').textContent=this.value">
+        <div class="range-top"><span>苦味</span><b id="v_bitterness">${range('bitterness')}</b></div>
+        <input type="range" min="1" max="10" value="${range('bitterness')}" id="r_bitterness" oninput="document.getElementById('v_bitterness').textContent=this.value">
       </div>
       <div class="range-group">
-        <div class="range-top"><span>甘み</span><b id="v_sweetness">5</b></div>
-        <input type="range" min="1" max="10" value="5" id="r_sweetness" oninput="document.getElementById('v_sweetness').textContent=this.value">
+        <div class="range-top"><span>甘み</span><b id="v_sweetness">${range('sweetness')}</b></div>
+        <input type="range" min="1" max="10" value="${range('sweetness')}" id="r_sweetness" oninput="document.getElementById('v_sweetness').textContent=this.value">
       </div>
       <div class="range-group">
-        <div class="range-top"><span>ボディ</span><b id="v_body">5</b></div>
-        <input type="range" min="1" max="10" value="5" id="r_body" oninput="document.getElementById('v_body').textContent=this.value">
+        <div class="range-top"><span>ボディ</span><b id="v_body">${range('body')}</b></div>
+        <input type="range" min="1" max="10" value="${range('body')}" id="r_body" oninput="document.getElementById('v_body').textContent=this.value">
       </div>
     </div>
 
     <div class="form-group">
       <label class="form-label">フレーバーノート</label>
-      <textarea id="f_flavorNote" placeholder="例）ジャスミンのような華やかな香り"></textarea>
+      <textarea id="f_flavorNote" placeholder="例）ジャスミンのような華やかな香り">${v('flavorNote')}</textarea>
     </div>
     <div class="form-group">
       <label class="form-label">次回への改善メモ</label>
-      <textarea id="f_improveNote" placeholder="例）次回は湯温を2℃下げてみる"></textarea>
+      <textarea id="f_improveNote" placeholder="例）次回は湯温を2℃下げてみる">${v('improveNote')}</textarea>
     </div>
 
     <button class="save-btn" onclick="saveBrewLog()">保存する</button>
@@ -805,6 +1152,8 @@ function initStarInput(containerId, hiddenValueRef) {
     const s = document.createElement('span');
     s.textContent = '★';
     s.dataset.val = i;
+    // 編集時は既存の評価を点灯させた状態から始める
+    if (i <= Number(hiddenValueRef.value || 0)) s.classList.add('on');
     s.onclick = () => {
       hiddenValueRef.value = i;
       Array.from(el.children).forEach(c => c.classList.toggle('on', Number(c.dataset.val) <= i));
@@ -814,23 +1163,26 @@ function initStarInput(containerId, hiddenValueRef) {
 }
 const overallRating = { value: 0 };
 
-// フォーム描画直後に★入力を初期化
-const _origStartBrewForm = startBrewForm;
-startBrewForm = function (method) {
-  _origStartBrewForm(method);
-  overallRating.value = 0;
-  initStarInput('overallStars', overallRating);
-};
-
 function saveBrewLog() {
-  const beanNameInput = document.getElementById('f_beanName').value.trim();
-  if (!beanNameInput) { alert('豆の名前を入力してください'); return; }
+  const sel = document.getElementById('f_beanSelect').value;
+  if (!sel) { alert('豆を選択してください'); return; }
+
+  // 値は "id:<豆ID>" か "name:<表示名>"
+  let beanId = null;
+  let beanName = '';
+  if (sel.startsWith('id:')) {
+    beanId = sel.slice(3);
+    beanName = beanLabel(findBean(beanId));
+  } else {
+    beanName = sel.slice(5);
+  }
 
   const log = {
-    id: uid(),
+    id: editingLogId || uid(),
     method: currentMethod,
     datetime: document.getElementById('f_datetime').value || nowLocalDatetime(),
-    beanName: beanNameInput,
+    beanId,
+    beanName,
     dose: document.getElementById('f_dose').value,
     rating: overallRating.value,
     acidity: document.getElementById('r_acidity').value,
@@ -858,7 +1210,16 @@ function saveBrewLog() {
     log.time = document.getElementById('f_time').value;
   }
 
-  brewLogs.unshift(log);
+  if (!log.beanId) delete log.beanId;
+
+  if (editingLogId) {
+    const idx = brewLogs.findIndex(l => l.id === editingLogId);
+    if (idx >= 0) brewLogs[idx] = log;
+  } else {
+    brewLogs.unshift(log);
+  }
+  editingLogId = null;
+
   saveData(LS_KEYS.brew, brewLogs);
   updateBeanDatalist();
   closeModal('modalBrewForm');
@@ -979,8 +1340,12 @@ function renderBrewList() {
     <div class="card">
       <div class="card-top">
         <div>
-          <div class="card-title">🫘 ${escapeHtml(log.beanName)}</div>
+          <div class="card-title${log.beanId ? ' linked' : ''}"${log.beanId ? ` onclick="openBeanInfo('${log.beanId}')"` : ''}>🫘 ${escapeHtml(logBeanLabel(log))}</div>
           <div class="card-date">${formatDateTime(log.datetime)}</div>
+        </div>
+        <div class="card-actions">
+          <button class="del-btn" onclick="editBrewLog('${log.id}')">✏️</button>
+          <button class="del-btn" onclick="deleteBrewLog('${log.id}')">×</button>
         </div>
       </div>
       <span class="badge">${brewMethodBadge(log.method)}</span>
@@ -1415,11 +1780,13 @@ function renderCafeList() {
    初期化
 ========================================================= */
 updateBeanDatalist();
+updateShopDatalist();
 renderBrewList();
 renderLatteList();
 renderCafeList();
 document.getElementById('headerSearchBtn').style.display = 'flex';
 document.getElementById('headerAnalysisBtn').style.display = 'flex';
+document.getElementById('headerBeanBtn').style.display = 'flex';
 
 </script>
 </body>
