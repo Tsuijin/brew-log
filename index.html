@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Brew Log">
 <meta name="theme-color" content="#121620">
 <!-- deploy.sh がデプロイ日時を焼き込む。curl して公開版の鮮度を確認するための印。 -->
-<meta name="app-version" content="2026-08-01 18:47">
+<meta name="app-version" content="2026-08-01 19:23">
 <style>
   :root {
     --bg-color: #121620;
@@ -614,6 +614,7 @@
       <button class="modal-close" onclick="closeModal('modalBeanList')">×</button>
     </div>
     <button class="add-btn" onclick="startBeanForm()">＋ 新しい豆を登録</button>
+    <div class="swipe-hint" id="beanListHint" style="display:none;">← 左にスワイプすると削除できます</div>
     <div id="beanList"></div>
   </div>
 </div>
@@ -895,27 +896,32 @@ function openBeanListModal() {
 
 function renderBeanList() {
   const wrap = document.getElementById('beanList');
+  document.getElementById('beanListHint').style.display = beans.length ? 'block' : 'none';
   if (!beans.length) {
     wrap.innerHTML = `<div class="empty-state"><span class="e-icon">🫘</span>まだ豆が登録されていません<br>購入した豆を登録すると、記録がラクになります</div>`;
     return;
   }
   wrap.innerHTML = beans.map(b => `
-    <div class="card">
-      <div class="card-top">
-        <div>
-          <div class="card-title">🫘 ${escapeHtml(beanLabel(b))}</div>
-          <div class="card-date">記録${brewLogs.filter(l => l.beanId === b.id).length}件</div>
+    <div class="swipe-wrap">
+      <button class="swipe-delete" onclick="deleteBean('${b.id}')">削除</button>
+      <div class="card">
+        <div class="card-top">
+          <div>
+            <div class="card-title">🫘 ${escapeHtml(beanLabel(b))}</div>
+            <div class="card-date">記録${brewLogs.filter(l => l.beanId === b.id).length}件</div>
+          </div>
+          <div class="card-actions">
+            <button class="del-btn" onclick="startBeanForm('${b.id}')">✏️</button>
+          </div>
         </div>
-        <div class="card-actions">
-          <button class="del-btn" onclick="startBeanForm('${b.id}')">✏️</button>
-          <button class="del-btn" onclick="deleteBean('${b.id}')">×</button>
-        </div>
+        ${b.roastLevel ? `<span class="badge">${escapeHtml(b.roastLevel)}</span>` : ''}
+        ${beanPhotosHtml(b)}
+        ${beanSpecHtml(b)}
       </div>
-      ${b.roastLevel ? `<span class="badge">${escapeHtml(b.roastLevel)}</span>` : ''}
-      ${beanPhotosHtml(b)}
-      ${beanSpecHtml(b)}
     </div>
   `).join('');
+
+  wrap.querySelectorAll('.swipe-wrap > .card').forEach(attachSwipeToDelete);
 }
 
 /** 登録済みの写真をタップで拡大できる形で並べる */
@@ -1689,6 +1695,7 @@ function attachSwipeToDelete(card) {
   card.addEventListener('pointerdown', (e) => {
     // ボタンやリンクの上から始まったスワイプは無視する
     if (e.target.closest('button, .card-title.linked')) return;
+    card._suppressClick = false;
     pointerId = e.pointerId;
     startX = e.clientX; startY = e.clientY;
     base = card._swipeOpen ? -SWIPE_REVEAL : 0;
@@ -1721,6 +1728,8 @@ function attachSwipeToDelete(card) {
     const wasX = axis === 'x';
     pointerId = null; axis = null;
     if (!wasX) return;
+    // スワイプ直後に発火する click（写真の拡大など）を一度だけ握りつぶす
+    card._suppressClick = true;
 
     const cur = new DOMMatrixReadOnly(getComputedStyle(card).transform).m41;
     card._swipeOpen = cur < -SWIPE_SNAP;
@@ -1730,10 +1739,17 @@ function attachSwipeToDelete(card) {
   card.addEventListener('pointerup', finish);
   card.addEventListener('pointercancel', finish);
 
-  // 開いているカードの本体をタップしたら閉じる（削除の誤爆を防ぐ）
   card.addEventListener('click', (e) => {
+    if (card._suppressClick) {
+      card._suppressClick = false;
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+    // 開いているカードの本体をタップしたら閉じる（削除の誤爆を防ぐ）
     if (card._swipeOpen && !e.target.closest('button')) {
       e.stopPropagation();
+      e.preventDefault();
       closeSwipedCards(null);
     }
   }, true);
