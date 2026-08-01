@@ -1,0 +1,1426 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+<title>Brew Log</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Brew Log">
+<meta name="theme-color" content="#121620">
+<!-- deploy.sh がデプロイ日時を焼き込む。curl して公開版の鮮度を確認するための印。 -->
+<meta name="app-version" content="2026-08-01 12:32">
+<style>
+  :root {
+    --bg-color: #121620;
+    --card-bg: #1C2230;
+    --card-bg-2: #232A3A;
+    --accent-color: #D19A66;
+    --accent-color-strong: #E4B483;
+    --text-color: #E8ECF2;
+    --sub-text: #8C93A3;
+    --border-color: #262C3A;
+    --danger: #C97B6E;
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-top: env(safe-area-inset-top, 0px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; }
+  body {
+    background-color: var(--bg-color);
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(209,154,102,0.06) 0%, transparent 45%),
+      radial-gradient(circle at 90% 30%, rgba(209,154,102,0.05) 0%, transparent 40%);
+    color: var(--text-color);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", sans-serif;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+    overscroll-behavior-y: none;
+  }
+  .app-container {
+    width: 100%;
+    max-width: 480px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    padding-bottom: calc(70px + var(--safe-bottom));
+  }
+  header {
+    padding: calc(18px + var(--safe-top)) 20px 12px;
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: linear-gradient(var(--bg-color) 70%, transparent);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  h1 { font-size: 22px; font-weight: 800; display:flex; align-items:center; gap:8px; }
+  h1 .hicon { font-size: 19px; }
+  .header-icon-btn {
+    background: var(--card-bg); border: 1px solid var(--border-color);
+    color: var(--text-color); width: 40px; height: 40px; border-radius: 12px;
+    font-size: 16px; cursor:pointer; flex-shrink:0; position: relative;
+    display: flex; align-items:center; justify-content:center;
+  }
+  .header-icon-btn.has-filter { border-color: var(--accent-color); color: var(--accent-color); }
+  .header-btn-group { display:flex; gap:8px; flex-shrink:0; }
+  .header-icon-btn .dot {
+    position:absolute; top:-3px; right:-3px; width:9px; height:9px; border-radius:50%;
+    background: var(--accent-color); display:none;
+  }
+  .header-icon-btn.has-filter .dot { display:block; }
+
+  main { padding: 6px 20px 10px; flex: 1; }
+  .tab-view { display: none; }
+  .tab-view.active { display: block; animation: fadeIn .18s ease; }
+  @keyframes fadeIn { from { opacity:0; transform: translateY(4px);} to {opacity:1; transform:none;} }
+
+  .add-btn {
+    width: 100%;
+    padding: 14px;
+    background-color: var(--accent-color);
+    color: #1A140D;
+    border: none;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 14px rgba(209,154,102,0.25);
+  }
+  .add-btn:active { transform: scale(0.98); }
+
+  .section-title {
+    font-size: 12px;
+    color: var(--sub-text);
+    letter-spacing: 0.08em;
+    margin-bottom: 10px;
+    font-weight: 700;
+  }
+
+  .empty-state {
+    text-align: center;
+    padding: 40px 16px;
+    color: var(--sub-text);
+    font-size: 13px;
+    border: 1px dashed var(--border-color);
+    border-radius: 14px;
+  }
+  .empty-state .e-icon { font-size: 28px; display:block; margin-bottom: 8px; }
+
+  /* カード共通 */
+  .card {
+    background-color: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 12px;
+    position: relative;
+  }
+  .card-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .card-title { font-weight: 700; font-size: 15.5px; line-height:1.3; }
+  .card-date { font-size: 11.5px; color: var(--sub-text); margin-top: 2px; }
+  .del-btn {
+    background: none; border: none; color: var(--sub-text);
+    font-size: 16px; cursor: pointer; padding: 2px 6px; line-height:1;
+    flex-shrink:0;
+  }
+  .del-btn:active { color: var(--danger); }
+
+  .badge {
+    display: inline-block;
+    padding: 3px 9px;
+    background-color: rgba(209,154,102,0.15);
+    color: var(--accent-color);
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+
+  .params-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+    background-color: rgba(0,0,0,0.2);
+    padding: 10px 6px;
+    border-radius: 10px;
+    margin-bottom: 10px;
+  }
+  .params-grid.cols2 { grid-template-columns: repeat(2, 1fr); }
+  .param-item { text-align: center; }
+  .param-label { font-size: 9.5px; color: var(--sub-text); display: block; margin-bottom: 3px; letter-spacing:.03em;}
+  .param-value { font-size: 13px; font-weight: 700; }
+
+  .stars { color: var(--accent-color); font-size: 14px; letter-spacing: 1px; margin-bottom: 6px; }
+  .memo-text { font-size: 13px; color: var(--sub-text); line-height: 1.5; }
+  .memo-label { font-size: 11px; color: var(--accent-color); font-weight:700; margin-top:8px; margin-bottom:2px; }
+
+  .taste-bars { display:flex; flex-direction:column; gap:5px; margin-bottom:10px; }
+  .taste-row { display:flex; align-items:center; gap:8px; font-size:11px; color: var(--sub-text); }
+  .taste-row .t-label { width: 38px; flex-shrink:0; }
+  .taste-track { flex:1; height:5px; background:rgba(255,255,255,0.06); border-radius:3px; overflow:hidden; }
+  .taste-fill { height:100%; background: var(--accent-color); border-radius:3px; }
+
+  /* 豆DB */
+  .best-recipe-box {
+    margin-top: 10px;
+    border: 1px solid rgba(209,154,102,0.35);
+    background: rgba(209,154,102,0.07);
+    border-radius: 12px;
+    padding: 12px;
+  }
+  .best-recipe-title {
+    font-size: 11.5px; font-weight: 800; color: var(--accent-color);
+    display:flex; align-items:center; gap:5px; margin-bottom:8px;
+  }
+
+  /* ラテアート */
+  .latte-photo {
+    width: 100%;
+    aspect-ratio: 4/3;
+    object-fit: cover;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    background: rgba(0,0,0,0.2);
+  }
+
+  /* モーダル */
+  .modal-overlay {
+    position: fixed; inset: 0;
+    background: rgba(6,8,12,0.6);
+    z-index: 50;
+    display: none;
+    justify-content: center;
+    align-items: flex-end;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal-sheet {
+    width: 100%; max-width: 480px;
+    background: var(--bg-color);
+    border-radius: 20px 20px 0 0;
+    max-height: 88vh;
+    overflow-y: auto;
+    padding: 16px 20px calc(24px + var(--safe-bottom));
+    animation: slideUp .22s ease;
+    border-top: 1px solid var(--border-color);
+  }
+  @keyframes slideUp { from { transform: translateY(30px); opacity:0;} to { transform:none; opacity:1;} }
+  .modal-handle { width:36px; height:4px; background: var(--border-color); border-radius:2px; margin: 0 auto 14px; }
+  .modal-header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 16px; }
+  .modal-title { font-size: 17px; font-weight: 800; }
+  .modal-close { background:none; border:none; color: var(--sub-text); font-size: 20px; cursor:pointer; padding: 4px 8px; }
+
+  .method-grid { display:flex; flex-direction:column; gap:10px; }
+  .method-card {
+    display:flex; align-items:center; gap:12px;
+    background: var(--card-bg); border: 1px solid var(--border-color);
+    border-radius: 14px; padding: 16px; cursor: pointer; text-align:left;
+    color: var(--text-color); font-size: 14.5px; font-weight:700;
+  }
+  .method-card:active { background: var(--card-bg-2); }
+  .method-card .m-icon { font-size: 22px; }
+  .method-card .m-sub { font-size: 11px; color: var(--sub-text); font-weight: 400; margin-top: 2px;}
+
+  .form-group { margin-bottom: 14px; }
+  .form-label { font-size: 12px; color: var(--sub-text); font-weight: 700; margin-bottom: 6px; display:block; letter-spacing:.02em; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .form-row3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
+  input[type=text], input[type=number], input[type=datetime-local], input[type=date], textarea, select {
+    width: 100%;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 10px;
+    padding: 11px 12px;
+    font-size: 14.5px;
+    font-family: inherit;
+  }
+  textarea { resize: vertical; min-height: 60px; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-color); }
+  ::placeholder { color: #545E6E; }
+
+  .star-input { display:flex; gap:6px; font-size: 26px; user-select:none; }
+  .star-input span { color: #383F4E; cursor:pointer; transition: color .1s; }
+  .star-input span.on { color: var(--accent-color); }
+
+  .range-group { margin-bottom: 12px; }
+  .range-top { display:flex; justify-content:space-between; font-size: 12px; color: var(--sub-text); margin-bottom:4px; }
+  .range-top b { color: var(--accent-color); font-size: 12px; }
+  input[type=range] {
+    -webkit-appearance: none; width: 100%; height: 5px;
+    background: rgba(255,255,255,0.08); border-radius: 3px; outline:none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
+    background: var(--accent-color); cursor:pointer; border: 3px solid var(--bg-color);
+  }
+
+  .segmented { display:flex; background: var(--card-bg); border:1px solid var(--border-color); border-radius: 10px; padding: 3px; gap: 3px; margin-bottom: 14px; }
+  .segmented button {
+    flex:1; padding: 9px 4px; background:none; border:none; color: var(--sub-text);
+    font-size: 12.5px; font-weight:700; border-radius: 8px; cursor:pointer;
+  }
+  .segmented button.active { background: var(--accent-color); color: #1A140D; }
+
+  .save-btn {
+    width:100%; padding: 15px; background: var(--accent-color); color:#1A140D;
+    border:none; border-radius: 12px; font-size: 15.5px; font-weight:800; cursor:pointer; margin-top: 6px;
+  }
+  .save-btn:active { transform: scale(.98); }
+
+  .photo-picker {
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    border: 1.5px dashed var(--border-color); border-radius: 14px; padding: 24px;
+    color: var(--sub-text); font-size: 13px; margin-bottom: 14px; cursor:pointer; text-align:center;
+  }
+  .photo-picker img { width:100%; border-radius: 10px; margin-bottom: 10px; max-height: 220px; object-fit:cover; }
+  .photo-picker .p-icon { font-size: 26px; margin-bottom: 6px; display:block; }
+
+  /* ボトムナビ */
+  .nav-bar {
+    position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 100%; max-width: 480px;
+    padding-bottom: var(--safe-bottom);
+    background-color: rgba(28,34,48,0.92);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-top: 1px solid var(--border-color);
+    display: flex; justify-content: space-around; align-items: center;
+    z-index: 20;
+  }
+  .nav-item {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    color: var(--sub-text); font-size: 10px; text-decoration: none;
+    padding: 10px 0; flex:1; background:none; border:none; font-family:inherit;
+  }
+  .nav-item.active { color: var(--accent-color); }
+  .nav-icon { font-size: 18px; }
+
+  .bean-select-wrap { position: relative; }
+
+  /* AIアドバイス */
+  .ai-btn {
+    width: 100%; margin-top: 10px; padding: 11px;
+    background: rgba(209,154,102,0.12);
+    border: 1px solid rgba(209,154,102,0.35);
+    color: var(--accent-color-strong);
+    border-radius: 10px; font-size: 13px; font-weight: 700;
+    font-family: inherit; cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+  }
+  .ai-btn:active { background: rgba(209,154,102,0.2); }
+  .ai-btn:disabled { opacity: .55; cursor: default; }
+
+  .ai-box {
+    margin-top: 10px;
+    border: 1px solid rgba(209,154,102,0.35);
+    background: rgba(209,154,102,0.07);
+    border-radius: 12px; padding: 12px;
+  }
+  .ai-box-title {
+    font-size: 11.5px; font-weight: 800; color: var(--accent-color);
+    display: flex; align-items: center; gap: 5px; margin-bottom: 8px;
+  }
+  .ai-cached-note { font-size: 10px; color: var(--sub-text); font-weight: 400; margin-left: auto; }
+  .ai-error {
+    margin-top: 10px; padding: 11px 12px;
+    border: 1px solid rgba(201,123,110,0.4);
+    background: rgba(201,123,110,0.08);
+    color: var(--danger);
+    border-radius: 10px; font-size: 12.5px; line-height: 1.5;
+  }
+  .ai-loading {
+    margin-top: 10px; padding: 16px;
+    display: flex; align-items: center; justify-content: center; gap: 10px;
+    color: var(--sub-text); font-size: 12.5px;
+    border: 1px dashed var(--border-color); border-radius: 10px;
+  }
+  .spinner {
+    width: 15px; height: 15px; flex-shrink: 0;
+    border: 2px solid rgba(209,154,102,0.25);
+    border-top-color: var(--accent-color);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
+</style>
+</head>
+<body>
+
+<div class="app-container">
+  <datalist id="beanDatalist"></datalist>
+
+  <header>
+    <div>
+      <h1><span class="hicon">☕</span>Brew Log</h1>
+    </div>
+    <div class="header-btn-group">
+      <button class="header-icon-btn" id="headerAnalysisBtn" onclick="openAnalysisModal()" style="display:none;">📊</button>
+      <button class="header-icon-btn" id="headerSearchBtn" onclick="openSearchModal()" style="display:none;">🔍<span class="dot"></span></button>
+    </div>
+  </header>
+
+  <main>
+
+    <!-- ============ 抽出ログ ============ -->
+    <section class="tab-view active" id="view-brew">
+      <button class="add-btn" onclick="openMethodModal()">＋ 新しい記録を追加</button>
+      <div class="section-title" id="brewListTitle">RECENT LOGS</div>
+      <div id="brewList"></div>
+    </section>
+
+    <!-- ============ MYレシピ ============ -->
+    <section class="tab-view" id="view-recipe">
+      <div class="section-title">MY RECIPES</div>
+      <div id="recipeList"></div>
+    </section>
+
+    <!-- ============ ラテアート ============ -->
+    <section class="tab-view" id="view-latte">
+      <button class="add-btn" onclick="openLatteModal()">＋ ラテアートを記録</button>
+      <div class="section-title">GALLERY</div>
+      <div id="latteList"></div>
+    </section>
+
+    <!-- ============ カフェログ ============ -->
+    <section class="tab-view" id="view-cafe">
+      <button class="add-btn" onclick="openCafeModal()">＋ カフェ記録を追加</button>
+      <div class="section-title">CAFE NOTES</div>
+      <div id="cafeList"></div>
+    </section>
+
+  </main>
+
+  <nav class="nav-bar">
+    <button class="nav-item active" data-tab="brew" onclick="switchTab('brew')">
+      <span class="nav-icon">☕</span><span>抽出</span>
+    </button>
+    <button class="nav-item" data-tab="recipe" onclick="switchTab('recipe')">
+      <span class="nav-icon">⭐</span><span>MYレシピ</span>
+    </button>
+    <button class="nav-item" data-tab="latte" onclick="switchTab('latte')">
+      <span class="nav-icon">🎨</span><span>ラテアート</span>
+    </button>
+    <button class="nav-item" data-tab="cafe" onclick="switchTab('cafe')">
+      <span class="nav-icon">🏪</span><span>カフェ</span>
+    </button>
+  </nav>
+</div>
+
+<!-- ========= モーダル: 抽出方法選択 ========= -->
+<div class="modal-overlay" id="modalMethod">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">抽出方法を選択</div>
+      <button class="modal-close" onclick="closeModal('modalMethod')">×</button>
+    </div>
+    <div class="method-grid">
+      <button class="method-card" onclick="startBrewForm('drip')">
+        <span class="m-icon">💧</span>
+        <span><div>ペーパードリップ</div><div class="m-sub">湯温・挽き目・湯量・時間を記録</div></span>
+      </button>
+      <button class="method-card" onclick="startBrewForm('espresso')">
+        <span class="m-icon">⚙️</span>
+        <span><div>エスプレッソ</div><div class="m-sub">湯温・挽き目・抽出量・時間を記録</div></span>
+      </button>
+      <button class="method-card" onclick="startBrewForm('frenchpress')">
+        <span class="m-icon">🫖</span>
+        <span><div>フレンチプレス</div><div class="m-sub">湯温・挽き目・湯量・浸漬時間を記録</div></span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ========= モーダル: 抽出ログ入力フォーム ========= -->
+<div class="modal-overlay" id="modalBrewForm">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title" id="brewFormTitle">記録を入力</div>
+      <button class="modal-close" onclick="closeModal('modalBrewForm')">×</button>
+    </div>
+    <div id="brewFormBody"></div>
+  </div>
+</div>
+
+<!-- ========= モーダル: ログ検索 ========= -->
+<div class="modal-overlay" id="modalSearch">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">過去ログを検索</div>
+      <button class="modal-close" onclick="closeModal('modalSearch')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">抽出方法</label>
+      <select id="s_method">
+        <option value="">すべて</option>
+        <option value="drip">ペーパードリップ</option>
+        <option value="espresso">エスプレッソ</option>
+        <option value="frenchpress">フレンチプレス</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">豆</label>
+      <input type="text" id="s_bean" list="beanDatalist" placeholder="豆の名前で絞り込み">
+    </div>
+    <div class="form-group">
+      <label class="form-label">期間</label>
+      <div class="form-row">
+        <input type="date" id="s_dateFrom">
+        <input type="date" id="s_dateTo">
+      </div>
+    </div>
+    <button class="save-btn" onclick="applySearch()">検索する</button>
+    <button class="add-mixer-btn" style="margin-top:10px;" onclick="resetSearch()">条件をクリア</button>
+  </div>
+</div>
+
+<!-- ========= モーダル: 抽出設定アドバイス ========= -->
+<div class="modal-overlay" id="modalAnalysis">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">おすすめ抽出設定</div>
+      <button class="modal-close" onclick="closeModal('modalAnalysis')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">豆を選択</label>
+      <select id="an_bean" onchange="renderAnalysisResult()">
+        <option value="">豆を選択してください</option>
+      </select>
+    </div>
+    <div id="analysisResult"></div>
+  </div>
+</div>
+
+<!-- ========= モーダル: ラテアート記録 ========= -->
+<div class="modal-overlay" id="modalLatte">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">ラテアートを記録</div>
+      <button class="modal-close" onclick="closeModal('modalLatte')">×</button>
+    </div>
+    <label class="photo-picker" id="lattePickerLabel">
+      <span class="p-icon">📷</span>
+      <span>タップして写真を選択</span>
+      <input type="file" accept="image/*" id="latteFile" style="display:none" onchange="onLattePhotoChange(event)">
+    </label>
+    <div class="form-group">
+      <label class="form-label">日付</label>
+      <input type="date" id="latteDate">
+    </div>
+    <div class="form-group">
+      <label class="form-label">ミルク / スチームメモ</label>
+      <input type="text" id="latteMilkNote" placeholder="例）ミルク65℃、脂肪分3.6%">
+    </div>
+    <div class="form-group">
+      <label class="form-label">出来栄えの一言コメント</label>
+      <textarea id="latteComment" placeholder="例）ハートの形が少し歪んだが、光沢は良好"></textarea>
+    </div>
+    <button class="save-btn" onclick="saveLatte()">保存する</button>
+  </div>
+</div>
+
+<!-- ========= モーダル: カフェログ ========= -->
+<div class="modal-overlay" id="modalCafe">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-header">
+      <div class="modal-title">カフェ記録を追加</div>
+      <button class="modal-close" onclick="closeModal('modalCafe')">×</button>
+    </div>
+    <div class="form-group">
+      <label class="form-label">日付</label>
+      <input type="date" id="cafeDate">
+    </div>
+    <div class="form-group">
+      <label class="form-label">店名</label>
+      <input type="text" id="cafeShop" placeholder="例）〇〇ロースタリー">
+    </div>
+    <div class="form-group">
+      <label class="form-label">メニュー名</label>
+      <input type="text" id="cafeMenu" placeholder="例）エチオピア シングルオリジン">
+    </div>
+    <div class="form-group">
+      <label class="form-label">フレーバー・質感メモ</label>
+      <textarea id="cafeFlavor" placeholder="例）ベリー系の酸味、紅茶のような質感、余韻に蜂蜜の甘さ"></textarea>
+    </div>
+    <label class="photo-picker" id="cafePickerLabel">
+      <span class="p-icon">📷</span>
+      <span>タップして写真を選択（任意）</span>
+      <input type="file" accept="image/*" id="cafeFile" style="display:none" onchange="onCafePhotoChange(event)">
+    </label>
+    <button class="save-btn" onclick="saveCafe()">保存する</button>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   共通ユーティリティ
+========================================================= */
+const LS_KEYS = { brew: 'bl_brewLogs', latte: 'bl_latteArts', cafe: 'bl_cafeNotes', aiCache: 'bl_aiCache' };
+
+/* -----------------------------------------------------------
+   AIアドバイス連携の設定
+   Cloudflare Worker をデプロイしたら、そのURLをここに貼る。
+   空文字のままなら AI ボタンは表示されず、従来の端末内分析だけで動く。
+   例: 'https://brew-log-api.<サブドメイン>.workers.dev'
+----------------------------------------------------------- */
+const AI_API_BASE = '';
+
+function loadData(key) {
+  try { return JSON.parse(localStorage.getItem(key)) || []; }
+  catch (e) { return []; }
+}
+function saveData(key, val) { localStorage.setItem(key, JSON.stringify(val)); }
+
+let brewLogs = loadData(LS_KEYS.brew);
+let latteArts = loadData(LS_KEYS.latte);
+let cafeNotes = loadData(LS_KEYS.cafe);
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+function escapeHtml(str) {
+  if (str === undefined || str === null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function formatDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function formatDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())}`;
+}
+function starsStr(n) {
+  n = Math.max(0, Math.min(5, Math.round(n || 0)));
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
+}
+function nowLocalDatetime() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function todayDate() {
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+/* =========================================================
+   タブ切り替え
+========================================================= */
+function switchTab(name) {
+  document.querySelectorAll('.tab-view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-' + name).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.getElementById('headerSearchBtn').style.display = (name === 'brew') ? 'flex' : 'none';
+  document.getElementById('headerAnalysisBtn').style.display = (name === 'brew') ? 'flex' : 'none';
+  if (name === 'brew') renderBrewList();
+  if (name === 'recipe') renderRecipeList();
+  if (name === 'latte') renderLatteList();
+  if (name === 'cafe') renderCafeList();
+}
+
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+/* =========================================================
+   抽出ログ（Brew Log）
+========================================================= */
+function openMethodModal() { openModal('modalMethod'); }
+
+let currentMethod = 'drip';
+
+function startBrewForm(method) {
+  currentMethod = method;
+  closeModal('modalMethod');
+  const titleMap = { drip: 'ペーパードリップ', espresso: 'エスプレッソ', frenchpress: 'フレンチプレス' };
+  document.getElementById('brewFormTitle').textContent = titleMap[method] + 'の記録';
+  document.getElementById('brewFormBody').innerHTML = buildBrewFormHtml(method);
+  openModal('modalBrewForm');
+}
+
+function updateBeanDatalist() {
+  const uniqueNames = Array.from(new Set(brewLogs.map(l => l.beanName).filter(Boolean)));
+  document.getElementById('beanDatalist').innerHTML = uniqueNames.map(name => `<option value="${escapeHtml(name)}">`).join('');
+}
+
+function buildBrewFormHtml(method) {
+  let methodFields = '';
+  if (method === 'drip') {
+    methodFields = `
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">湯温 (℃)</label>
+          <input type="number" inputmode="decimal" id="f_waterTemp" placeholder="92">
+        </div>
+        <div class="form-group">
+          <label class="form-label">挽き目</label>
+          <input type="text" inputmode="decimal" id="f_grind" placeholder="中細 / 4.0など">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">湯量 (g)</label>
+          <input type="number" inputmode="decimal" id="f_waterAmount" placeholder="230">
+        </div>
+        <div class="form-group">
+          <label class="form-label">抽出時間（分:秒）</label>
+          <input type="text" inputmode="numeric" id="f_time" placeholder="2:30">
+        </div>
+      </div>`;
+  } else if (method === 'espresso') {
+    methodFields = `
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">湯温</label>
+          <select id="f_waterTemp">
+            <option value="低">低</option>
+            <option value="中" selected>中</option>
+            <option value="高">高</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">挽き目</label>
+          <input type="text" inputmode="decimal" id="f_grind" placeholder="細挽き / 2.0など">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">抽出量 / Yield (g)</label>
+          <input type="number" inputmode="decimal" id="f_yield" placeholder="36">
+        </div>
+        <div class="form-group">
+          <label class="form-label">抽出時間 (秒)</label>
+          <input type="number" inputmode="decimal" id="f_time" placeholder="27">
+        </div>
+      </div>`;
+  } else if (method === 'frenchpress') {
+    methodFields = `
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">湯温 (℃)</label>
+          <input type="number" inputmode="decimal" id="f_waterTemp" placeholder="94">
+        </div>
+        <div class="form-group">
+          <label class="form-label">挽き目</label>
+          <input type="text" inputmode="decimal" id="f_grind" placeholder="粗挽き / 6.0など">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">湯量 (g)</label>
+          <input type="number" inputmode="decimal" id="f_waterAmount" placeholder="300">
+        </div>
+        <div class="form-group">
+          <label class="form-label">浸漬時間（分:秒）</label>
+          <input type="text" inputmode="numeric" id="f_time" placeholder="4:00">
+        </div>
+      </div>`;
+  }
+
+  return `
+    <div class="form-group">
+      <label class="form-label">日時</label>
+      <input type="datetime-local" id="f_datetime" value="${nowLocalDatetime()}">
+    </div>
+    <div class="form-group bean-select-wrap">
+      <label class="form-label">豆（過去の入力から選択 or 直接入力）</label>
+      <input type="text" id="f_beanName" list="beanDatalist" placeholder="豆の名前を入力 or 選択">
+    </div>
+    <div class="form-group">
+      <label class="form-label">粉量 (g)</label>
+      <input type="number" inputmode="decimal" id="f_dose" placeholder="15">
+    </div>
+
+    ${methodFields}
+
+    <div class="form-group">
+      <label class="form-label">全体評価</label>
+      <div class="star-input" id="overallStars"></div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">出来栄え&フィードバック</label>
+      <div class="range-group">
+        <div class="range-top"><span>酸味</span><b id="v_acidity">5</b></div>
+        <input type="range" min="1" max="10" value="5" id="r_acidity" oninput="document.getElementById('v_acidity').textContent=this.value">
+      </div>
+      <div class="range-group">
+        <div class="range-top"><span>苦味</span><b id="v_bitterness">5</b></div>
+        <input type="range" min="1" max="10" value="5" id="r_bitterness" oninput="document.getElementById('v_bitterness').textContent=this.value">
+      </div>
+      <div class="range-group">
+        <div class="range-top"><span>甘み</span><b id="v_sweetness">5</b></div>
+        <input type="range" min="1" max="10" value="5" id="r_sweetness" oninput="document.getElementById('v_sweetness').textContent=this.value">
+      </div>
+      <div class="range-group">
+        <div class="range-top"><span>ボディ</span><b id="v_body">5</b></div>
+        <input type="range" min="1" max="10" value="5" id="r_body" oninput="document.getElementById('v_body').textContent=this.value">
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label class="form-label">フレーバーノート</label>
+      <textarea id="f_flavorNote" placeholder="例）ジャスミンのような華やかな香り"></textarea>
+    </div>
+    <div class="form-group">
+      <label class="form-label">次回への改善メモ</label>
+      <textarea id="f_improveNote" placeholder="例）次回は湯温を2℃下げてみる"></textarea>
+    </div>
+
+    <button class="save-btn" onclick="saveBrewLog()">保存する</button>
+  `;
+}
+
+function initStarInput(containerId, hiddenValueRef) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '';
+  for (let i = 1; i <= 5; i++) {
+    const s = document.createElement('span');
+    s.textContent = '★';
+    s.dataset.val = i;
+    s.onclick = () => {
+      hiddenValueRef.value = i;
+      Array.from(el.children).forEach(c => c.classList.toggle('on', Number(c.dataset.val) <= i));
+    };
+    el.appendChild(s);
+  }
+}
+const overallRating = { value: 0 };
+
+// フォーム描画直後に★入力を初期化
+const _origStartBrewForm = startBrewForm;
+startBrewForm = function (method) {
+  _origStartBrewForm(method);
+  overallRating.value = 0;
+  initStarInput('overallStars', overallRating);
+};
+
+function saveBrewLog() {
+  const beanNameInput = document.getElementById('f_beanName').value.trim();
+  if (!beanNameInput) { alert('豆の名前を入力してください'); return; }
+
+  const log = {
+    id: uid(),
+    method: currentMethod,
+    datetime: document.getElementById('f_datetime').value || nowLocalDatetime(),
+    beanName: beanNameInput,
+    dose: document.getElementById('f_dose').value,
+    rating: overallRating.value,
+    acidity: document.getElementById('r_acidity').value,
+    bitterness: document.getElementById('r_bitterness').value,
+    sweetness: document.getElementById('r_sweetness').value,
+    body: document.getElementById('r_body').value,
+    flavorNote: document.getElementById('f_flavorNote').value.trim(),
+    improveNote: document.getElementById('f_improveNote').value.trim(),
+  };
+
+  if (currentMethod === 'drip') {
+    log.waterTemp = document.getElementById('f_waterTemp').value;
+    log.grind = document.getElementById('f_grind').value;
+    log.waterAmount = document.getElementById('f_waterAmount').value;
+    log.time = document.getElementById('f_time').value;
+  } else if (currentMethod === 'espresso') {
+    log.waterTemp = document.getElementById('f_waterTemp').value;
+    log.grind = document.getElementById('f_grind').value;
+    log.yield = document.getElementById('f_yield').value;
+    log.time = document.getElementById('f_time').value;
+  } else if (currentMethod === 'frenchpress') {
+    log.waterTemp = document.getElementById('f_waterTemp').value;
+    log.grind = document.getElementById('f_grind').value;
+    log.waterAmount = document.getElementById('f_waterAmount').value;
+    log.time = document.getElementById('f_time').value;
+  }
+
+  brewLogs.unshift(log);
+  saveData(LS_KEYS.brew, brewLogs);
+  updateBeanDatalist();
+  closeModal('modalBrewForm');
+  renderBrewList();
+}
+
+function deleteBrewLog(id) {
+  if (!confirm('この記録を削除しますか？')) return;
+  brewLogs = brewLogs.filter(l => l.id !== id);
+  saveData(LS_KEYS.brew, brewLogs);
+  updateBeanDatalist();
+  renderBrewList();
+}
+
+function brewMethodBadge(m) {
+  return { drip: 'ペーパードリップ', espresso: 'エスプレッソ', frenchpress: 'フレンチプレス' }[m] || m;
+}
+
+function brewParamsHtml(log) {
+  if (log.method === 'drip') {
+    return `<div class="params-grid">
+      <div class="param-item"><span class="param-label">粉量</span><span class="param-value">${escapeHtml(log.dose)}g</span></div>
+      <div class="param-item"><span class="param-label">湯量</span><span class="param-value">${escapeHtml(log.waterAmount)}g</span></div>
+      <div class="param-item"><span class="param-label">湯温</span><span class="param-value">${escapeHtml(log.waterTemp)}℃</span></div>
+      <div class="param-item"><span class="param-label">挽き目</span><span class="param-value">${escapeHtml(log.grind)}</span></div>
+      <div class="param-item"><span class="param-label">時間</span><span class="param-value">${escapeHtml(log.time)}</span></div>
+    </div>`;
+  } else if (log.method === 'espresso') {
+    return `<div class="params-grid">
+      <div class="param-item"><span class="param-label">In</span><span class="param-value">${escapeHtml(log.dose)}g</span></div>
+      <div class="param-item"><span class="param-label">Out</span><span class="param-value">${escapeHtml(log.yield)}g</span></div>
+      <div class="param-item"><span class="param-label">時間</span><span class="param-value">${escapeHtml(log.time)}秒</span></div>
+      <div class="param-item"><span class="param-label">湯温</span><span class="param-value">${escapeHtml(log.waterTemp)}</span></div>
+      <div class="param-item"><span class="param-label">挽き目</span><span class="param-value">${escapeHtml(log.grind)}</span></div>
+    </div>`;
+  } else if (log.method === 'frenchpress') {
+    return `<div class="params-grid">
+      <div class="param-item"><span class="param-label">粉量</span><span class="param-value">${escapeHtml(log.dose)}g</span></div>
+      <div class="param-item"><span class="param-label">湯量</span><span class="param-value">${escapeHtml(log.waterAmount)}g</span></div>
+      <div class="param-item"><span class="param-label">湯温</span><span class="param-value">${escapeHtml(log.waterTemp)}℃</span></div>
+      <div class="param-item"><span class="param-label">挽き目</span><span class="param-value">${escapeHtml(log.grind)}</span></div>
+      <div class="param-item"><span class="param-label">浸漬時間</span><span class="param-value">${escapeHtml(log.time)}</span></div>
+    </div>`;
+  }
+}
+
+function tasteBarsHtml(log) {
+  const rows = [['酸味', log.acidity], ['苦味', log.bitterness], ['甘み', log.sweetness], ['ボディ', log.body]];
+  return `<div class="taste-bars">${rows.map(([label, val]) => `
+    <div class="taste-row">
+      <span class="t-label">${label}</span>
+      <div class="taste-track"><div class="taste-fill" style="width:${(Number(val || 0) / 10) * 100}%"></div></div>
+    </div>`).join('')}</div>`;
+}
+
+let searchFilter = { method: '', bean: '', dateFrom: '', dateTo: '' };
+
+function openSearchModal() {
+  document.getElementById('s_method').value = searchFilter.method;
+  document.getElementById('s_bean').value = searchFilter.bean;
+  document.getElementById('s_dateFrom').value = searchFilter.dateFrom;
+  document.getElementById('s_dateTo').value = searchFilter.dateTo;
+  openModal('modalSearch');
+}
+
+function applySearch() {
+  searchFilter = {
+    method: document.getElementById('s_method').value,
+    bean: document.getElementById('s_bean').value.trim(),
+    dateFrom: document.getElementById('s_dateFrom').value,
+    dateTo: document.getElementById('s_dateTo').value,
+  };
+  closeModal('modalSearch');
+  renderBrewList();
+}
+
+function resetSearch() {
+  searchFilter = { method: '', bean: '', dateFrom: '', dateTo: '' };
+  document.getElementById('s_method').value = '';
+  document.getElementById('s_bean').value = '';
+  document.getElementById('s_dateFrom').value = '';
+  document.getElementById('s_dateTo').value = '';
+  closeModal('modalSearch');
+  renderBrewList();
+}
+
+function isSearchActive() {
+  return !!(searchFilter.method || searchFilter.bean || searchFilter.dateFrom || searchFilter.dateTo);
+}
+
+function applyFilters(logs) {
+  return logs.filter(log => {
+    if (searchFilter.method && log.method !== searchFilter.method) return false;
+    if (searchFilter.bean && !log.beanName.toLowerCase().includes(searchFilter.bean.toLowerCase())) return false;
+    const logDate = (log.datetime || '').slice(0, 10);
+    if (searchFilter.dateFrom && logDate < searchFilter.dateFrom) return false;
+    if (searchFilter.dateTo && logDate > searchFilter.dateTo) return false;
+    return true;
+  });
+}
+
+function renderBrewList() {
+  document.getElementById('headerSearchBtn').classList.toggle('has-filter', isSearchActive());
+  document.getElementById('brewListTitle').textContent = isSearchActive() ? '検索結果' : 'RECENT LOGS';
+
+  const wrap = document.getElementById('brewList');
+  const filteredLogs = isSearchActive() ? applyFilters(brewLogs) : brewLogs;
+
+  if (!brewLogs.length) {
+    wrap.innerHTML = `<div class="empty-state"><span class="e-icon">☕</span>まだ記録がありません<br>最初の一杯を記録してみましょう</div>`;
+    return;
+  }
+  if (!filteredLogs.length) {
+    wrap.innerHTML = `<div class="empty-state"><span class="e-icon">🔍</span>条件に一致する記録がありません</div>`;
+    return;
+  }
+  wrap.innerHTML = filteredLogs.map(log => `
+    <div class="card">
+      <div class="card-top">
+        <div>
+          <div class="card-title">🫘 ${escapeHtml(log.beanName)}</div>
+          <div class="card-date">${formatDateTime(log.datetime)}</div>
+        </div>
+      </div>
+      <span class="badge">${brewMethodBadge(log.method)}</span>
+      ${brewParamsHtml(log)}
+      <div class="stars">${starsStr(log.rating)}</div>
+      ${tasteBarsHtml(log)}
+      ${log.flavorNote ? `<div class="memo-label">フレーバーノート</div><div class="memo-text">${escapeHtml(log.flavorNote)}</div>` : ''}
+      ${log.improveNote ? `<div class="memo-label">次回への改善メモ</div><div class="memo-text">${escapeHtml(log.improveNote)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+/* =========================================================
+   分析（過去ログからのおすすめ抽出設定）
+========================================================= */
+function parseTimeToSeconds(str) {
+  if (!str) return null;
+  const s = String(str).trim();
+  if (s.includes(':')) {
+    const [m, sec] = s.split(':').map(v => parseFloat(v));
+    if (isNaN(m) || isNaN(sec)) return null;
+    return m * 60 + sec;
+  }
+  const n = parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+function secondsToTimeStr(totalSec) {
+  const t = Math.round(totalSec);
+  const m = Math.floor(t / 60);
+  const s = t % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function weightedAvgField(logs, field) {
+  let sumVal = 0, sumWeight = 0;
+  logs.forEach(l => {
+    const n = parseFloat(l[field]);
+    if (!isNaN(n)) {
+      const w = Math.max(1, Number(l.rating) || 1);
+      sumVal += n * w;
+      sumWeight += w;
+    }
+  });
+  return sumWeight ? sumVal / sumWeight : null;
+}
+
+function weightedModeField(logs, field) {
+  const scores = {};
+  logs.forEach(l => {
+    const v = (l[field] || '').toString().trim();
+    if (!v) return;
+    const w = Math.max(1, Number(l.rating) || 1);
+    scores[v] = (scores[v] || 0) + w;
+  });
+  let best = null, bestScore = -1;
+  Object.keys(scores).forEach(k => { if (scores[k] > bestScore) { best = k; bestScore = scores[k]; } });
+  return best;
+}
+
+function openAnalysisModal() {
+  const select = document.getElementById('an_bean');
+  const uniqueNames = Array.from(new Set(brewLogs.map(l => l.beanName).filter(Boolean)));
+  select.innerHTML = `<option value="">豆を選択してください</option>` +
+    uniqueNames.map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join('');
+  document.getElementById('analysisResult').innerHTML = '';
+  openModal('modalAnalysis');
+}
+
+function buildRecommendationCard(method, logs, beanName) {
+  const count = logs.length;
+  const avgRating = logs.reduce((sum, l) => sum + (Number(l.rating) || 0), 0) / count;
+  const dose = weightedAvgField(logs, 'dose');
+  const grind = weightedModeField(logs, 'grind');
+
+  let paramsHtml = '';
+  if (method === 'drip' || method === 'frenchpress') {
+    const waterTemp = weightedAvgField(logs, 'waterTemp');
+    const waterAmount = weightedAvgField(logs, 'waterAmount');
+    const secs = logs.map(l => ({ sec: parseTimeToSeconds(l.time), w: Math.max(1, Number(l.rating) || 1) })).filter(x => x.sec !== null);
+    const timeAvgSec = secs.length ? secs.reduce((s, x) => s + x.sec * x.w, 0) / secs.reduce((s, x) => s + x.w, 0) : null;
+    paramsHtml = `<div class="params-grid">
+      <div class="param-item"><span class="param-label">粉量</span><span class="param-value">${dose !== null ? dose.toFixed(1) + 'g' : '-'}</span></div>
+      <div class="param-item"><span class="param-label">湯量</span><span class="param-value">${waterAmount !== null ? Math.round(waterAmount) + 'g' : '-'}</span></div>
+      <div class="param-item"><span class="param-label">湯温</span><span class="param-value">${waterTemp !== null ? Math.round(waterTemp) + '℃' : '-'}</span></div>
+      <div class="param-item"><span class="param-label">挽き目</span><span class="param-value">${grind ? escapeHtml(grind) : '-'}</span></div>
+      <div class="param-item"><span class="param-label">${method === 'drip' ? '時間' : '浸漬時間'}</span><span class="param-value">${timeAvgSec !== null ? secondsToTimeStr(timeAvgSec) : '-'}</span></div>
+    </div>`;
+  } else {
+    const waterTemp = weightedModeField(logs, 'waterTemp');
+    const yieldAmt = weightedAvgField(logs, 'yield');
+    const timeSecs = weightedAvgField(logs, 'time');
+    paramsHtml = `<div class="params-grid">
+      <div class="param-item"><span class="param-label">In</span><span class="param-value">${dose !== null ? dose.toFixed(1) + 'g' : '-'}</span></div>
+      <div class="param-item"><span class="param-label">Out</span><span class="param-value">${yieldAmt !== null ? yieldAmt.toFixed(1) + 'g' : '-'}</span></div>
+      <div class="param-item"><span class="param-label">時間</span><span class="param-value">${timeSecs !== null ? Math.round(timeSecs) + '秒' : '-'}</span></div>
+      <div class="param-item"><span class="param-label">湯温</span><span class="param-value">${waterTemp ? escapeHtml(waterTemp) : '-'}</span></div>
+      <div class="param-item"><span class="param-label">挽き目</span><span class="param-value">${grind ? escapeHtml(grind) : '-'}</span></div>
+    </div>`;
+  }
+
+  const adviceText = count < 2
+    ? 'この豆・方式の記録がまだ少ないため参考程度にご覧ください。記録が増えるほど精度が上がります。'
+    : `${count}件の記録（平均評価 ${avgRating.toFixed(1)}）をもとに、評価の高い記録ほど重視して算出したおすすめ設定です。`;
+
+  return `
+    <div class="card">
+      <div class="card-top">
+        <div>
+          <div class="card-title">${brewMethodBadge(method)}</div>
+          <div class="card-date">記録${count}件 ・ 平均★${avgRating.toFixed(1)}</div>
+        </div>
+      </div>
+      <div class="best-recipe-box">
+        <div class="best-recipe-title">📊 おすすめ設定（端末内の統計）</div>
+        ${paramsHtml}
+        <div class="memo-text" style="margin-top:8px;">${adviceText}</div>
+      </div>
+      ${aiSectionHtml(method, logs, beanName)}
+    </div>
+  `;
+}
+
+function renderAnalysisResult() {
+  const beanName = document.getElementById('an_bean').value;
+  const wrap = document.getElementById('analysisResult');
+  if (!beanName) {
+    wrap.innerHTML = '';
+    return;
+  }
+  const logs = brewLogs.filter(l => l.beanName === beanName);
+  if (!logs.length) {
+    wrap.innerHTML = `<div class="empty-state" style="margin-top:14px;"><span class="e-icon">📊</span>この豆の記録がありません</div>`;
+    return;
+  }
+  const methods = Array.from(new Set(logs.map(l => l.method)));
+  wrap.innerHTML = `<div class="section-title" style="margin-top:16px;">${escapeHtml(beanName)} のおすすめ設定</div>` +
+    methods.map(m => buildRecommendationCard(m, logs.filter(l => l.method === m), beanName)).join('');
+}
+
+/* =========================================================
+   AIアドバイス（オンライン時のみ。統計分析は常にそのまま残る）
+========================================================= */
+
+/** ログの内容が1件でも変われば別キーになるハッシュ */
+function aiCacheKey(beanName, method, logs) {
+  const src = JSON.stringify([beanName, method, logs]);
+  let h = 5381;
+  for (let i = 0; i < src.length; i++) h = ((h * 33) ^ src.charCodeAt(i)) >>> 0;
+  return `${method}:${h.toString(36)}`;
+}
+
+function loadAiCache() {
+  try { return JSON.parse(localStorage.getItem(LS_KEYS.aiCache)) || {}; }
+  catch (e) { return {}; }
+}
+
+function saveAiCacheEntry(key, data) {
+  const cache = loadAiCache();
+  cache[key] = { data, at: Date.now() };
+  // 肥大化防止：古いものから捨てて30件に収める
+  const keys = Object.keys(cache).sort((a, b) => cache[b].at - cache[a].at);
+  const trimmed = {};
+  keys.slice(0, 30).forEach(k => { trimmed[k] = cache[k]; });
+  try { localStorage.setItem(LS_KEYS.aiCache, JSON.stringify(trimmed)); }
+  catch (e) { /* 容量オーバー時はキャッシュを諦める */ }
+}
+
+/** 分析カード内のAI欄。キャッシュがあれば即座に描画する */
+function aiSectionHtml(method, logs, beanName) {
+  if (!AI_API_BASE) return '';
+  const cached = loadAiCache()[aiCacheKey(beanName, method, logs)];
+  const body = cached
+    ? aiResultHtml(cached.data, cached.at)
+    : `<button class="ai-btn" onclick="requestAiAdvice('${method}')">🤖 AIに詳しくアドバイスをもらう</button>`;
+  return `<div id="aiSlot-${method}">${body}</div>`;
+}
+
+function aiResultHtml(data, cachedAt) {
+  const rec = data.recommendation || {};
+  const cell = (label, value) => (value && value !== '-')
+    ? `<div class="param-item"><span class="param-label">${label}</span><span class="param-value">${escapeHtml(value)}</span></div>`
+    : '';
+  const params = [
+    cell('粉量', rec.dose), cell('湯量', rec.waterAmount), cell('抽出量', rec.yield),
+    cell('湯温', rec.waterTemp), cell('挽き目', rec.grind), cell('時間', rec.time),
+  ].join('');
+  const note = cachedAt ? `<span class="ai-cached-note">${formatDateTime(new Date(cachedAt).toISOString())} の結果</span>` : '';
+  return `
+    <div class="ai-box">
+      <div class="ai-box-title">🤖 AIのアドバイス${note}</div>
+      ${params ? `<div class="params-grid">${params}</div>` : ''}
+      ${data.advice ? `<div class="memo-text">${escapeHtml(data.advice)}</div>` : ''}
+      ${data.nextExperiment ? `<div class="memo-label">次に試すこと</div><div class="memo-text">${escapeHtml(data.nextExperiment)}</div>` : ''}
+    </div>`;
+}
+
+async function requestAiAdvice(method) {
+  const slot = document.getElementById('aiSlot-' + method);
+  if (!slot) return;
+  const beanName = document.getElementById('an_bean').value;
+  const logs = brewLogs.filter(l => l.beanName === beanName && l.method === method);
+  if (!beanName || !logs.length) return;
+
+  if (!navigator.onLine) {
+    slot.innerHTML = `<div class="ai-error">オフラインのため AI アドバイスを取得できません。上の統計分析はそのまま使えます。</div>
+      <button class="ai-btn" onclick="requestAiAdvice('${method}')">再試行</button>`;
+    return;
+  }
+
+  slot.innerHTML = `<div class="ai-loading"><span class="spinner"></span>AI が過去ログを読んでいます…</div>`;
+
+  // モバイル回線で固まらないよう上限を切る
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const res = await fetch(AI_API_BASE + '/api/recommend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ beanName, method, logs }),
+      signal: controller.signal,
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(payload.error || `サーバーエラー (${res.status})`);
+
+    saveAiCacheEntry(aiCacheKey(beanName, method, logs), payload);
+    slot.innerHTML = aiResultHtml(payload, null);
+  } catch (err) {
+    const msg = err.name === 'AbortError'
+      ? '応答が時間内に返りませんでした。'
+      : (err.message || '通信に失敗しました。');
+    slot.innerHTML = `<div class="ai-error">${escapeHtml(msg)}<br>上の統計分析はそのまま使えます。</div>
+      <button class="ai-btn" onclick="requestAiAdvice('${method}')">再試行</button>`;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/* =========================================================
+   MYレシピ（豆ごとのベストレシピ自動表示）
+========================================================= */
+function bestRecipeFor(beanName) {
+  const logs = brewLogs.filter(l => l.beanName === beanName);
+  if (!logs.length) return null;
+  return logs.reduce((best, cur) => (Number(cur.rating) > Number(best.rating) ? cur : best), logs[0]);
+}
+
+function renderRecipeList() {
+  const wrap = document.getElementById('recipeList');
+  const uniqueNames = Array.from(new Set(brewLogs.map(l => l.beanName).filter(Boolean)));
+
+  if (!uniqueNames.length) {
+    wrap.innerHTML = `<div class="empty-state"><span class="e-icon">⭐</span>まだレシピがありません<br>抽出ログを記録すると、豆ごとのベストレシピが自動で表示されます</div>`;
+    return;
+  }
+
+  const recipes = uniqueNames.map(name => ({ name, best: bestRecipeFor(name), count: brewLogs.filter(l => l.beanName === name).length }));
+  recipes.sort((a, b) => Number(b.best.rating) - Number(a.best.rating));
+
+  wrap.innerHTML = recipes.map(r => `
+    <div class="card">
+      <div class="card-top">
+        <div>
+          <div class="card-title">🫘 ${escapeHtml(r.name)}</div>
+          <div class="card-date">記録${r.count}件</div>
+        </div>
+      </div>
+      <div class="best-recipe-box">
+        <div class="best-recipe-title">⭐ ベストレシピ（${starsStr(r.best.rating)}）</div>
+        <span class="badge">${brewMethodBadge(r.best.method)}</span>
+        ${brewParamsHtml(r.best)}
+        ${r.best.flavorNote ? `<div class="memo-label">フレーバーノート</div><div class="memo-text">${escapeHtml(r.best.flavorNote)}</div>` : ''}
+      </div>
+    </div>
+  `).join('');
+}
+
+/* =========================================================
+   ラテアートギャラリー
+========================================================= */
+let pendingLattePhoto = '';
+
+function openLatteModal() {
+  pendingLattePhoto = '';
+  document.getElementById('lattePickerLabel').innerHTML = `
+    <span class="p-icon">📷</span><span>タップして写真を選択</span>
+    <input type="file" accept="image/*" id="latteFile" style="display:none" onchange="onLattePhotoChange(event)">
+  `;
+  document.getElementById('latteDate').value = todayDate();
+  document.getElementById('latteMilkNote').value = '';
+  document.getElementById('latteComment').value = '';
+  openModal('modalLatte');
+}
+
+function onLattePhotoChange(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    pendingLattePhoto = e.target.result;
+    document.getElementById('lattePickerLabel').innerHTML = `
+      <img src="${pendingLattePhoto}" alt="latte">
+      <span>タップして写真を変更</span>
+      <input type="file" accept="image/*" id="latteFile" style="display:none" onchange="onLattePhotoChange(event)">
+    `;
+  };
+  reader.readAsDataURL(file);
+}
+
+function saveLatte() {
+  if (!pendingLattePhoto) { alert('写真を選択してください'); return; }
+  latteArts.unshift({
+    id: uid(),
+    date: document.getElementById('latteDate').value || todayDate(),
+    photo: pendingLattePhoto,
+    milkNote: document.getElementById('latteMilkNote').value.trim(),
+    comment: document.getElementById('latteComment').value.trim(),
+  });
+  saveData(LS_KEYS.latte, latteArts);
+  closeModal('modalLatte');
+  renderLatteList();
+}
+
+function deleteLatte(id) {
+  if (!confirm('この記録を削除しますか？')) return;
+  latteArts = latteArts.filter(l => l.id !== id);
+  saveData(LS_KEYS.latte, latteArts);
+  renderLatteList();
+}
+
+function renderLatteList() {
+  const wrap = document.getElementById('latteList');
+  if (!latteArts.length) {
+    wrap.innerHTML = `<div class="empty-state"><span class="e-icon">🎨</span>まだ記録がありません<br>ラテアートの上達を記録しましょう</div>`;
+    return;
+  }
+  wrap.innerHTML = latteArts.map(l => `
+    <div class="card">
+      <img class="latte-photo" src="${l.photo}" alt="latte art">
+      <div class="card-top">
+        <div class="card-date">${formatDate(l.date)}</div>
+        <button class="del-btn" onclick="deleteLatte('${l.id}')">×</button>
+      </div>
+      ${l.milkNote ? `<div class="memo-label">ミルク / スチームメモ</div><div class="memo-text">${escapeHtml(l.milkNote)}</div>` : ''}
+      ${l.comment ? `<div class="memo-label">コメント</div><div class="memo-text">${escapeHtml(l.comment)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+/* =========================================================
+   カフェ・外飲みログ
+========================================================= */
+let pendingCafePhoto = '';
+
+function resetCafePicker() {
+  pendingCafePhoto = '';
+  document.getElementById('cafePickerLabel').innerHTML = `
+    <span class="p-icon">📷</span><span>タップして写真を選択（任意）</span>
+    <input type="file" accept="image/*" id="cafeFile" style="display:none" onchange="onCafePhotoChange(event)">
+  `;
+}
+
+function onCafePhotoChange(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    pendingCafePhoto = e.target.result;
+    document.getElementById('cafePickerLabel').innerHTML = `
+      <img src="${pendingCafePhoto}" alt="cafe">
+      <span>タップして写真を変更</span>
+      <input type="file" accept="image/*" id="cafeFile" style="display:none" onchange="onCafePhotoChange(event)">
+    `;
+  };
+  reader.readAsDataURL(file);
+}
+
+function openCafeModal() {
+  document.getElementById('cafeDate').value = todayDate();
+  document.getElementById('cafeShop').value = '';
+  document.getElementById('cafeMenu').value = '';
+  document.getElementById('cafeFlavor').value = '';
+  resetCafePicker();
+  openModal('modalCafe');
+}
+
+function saveCafe() {
+  const shop = document.getElementById('cafeShop').value.trim();
+  if (!shop) { alert('店名を入力してください'); return; }
+  cafeNotes.unshift({
+    id: uid(),
+    date: document.getElementById('cafeDate').value || todayDate(),
+    shop,
+    menu: document.getElementById('cafeMenu').value.trim(),
+    flavor: document.getElementById('cafeFlavor').value.trim(),
+    photo: pendingCafePhoto,
+  });
+  saveData(LS_KEYS.cafe, cafeNotes);
+  closeModal('modalCafe');
+  renderCafeList();
+}
+
+function deleteCafe(id) {
+  if (!confirm('この記録を削除しますか？')) return;
+  cafeNotes = cafeNotes.filter(c => c.id !== id);
+  saveData(LS_KEYS.cafe, cafeNotes);
+  renderCafeList();
+}
+
+function renderCafeList() {
+  const wrap = document.getElementById('cafeList');
+  if (!cafeNotes.length) {
+    wrap.innerHTML = `<div class="empty-state"><span class="e-icon">🏪</span>まだ記録がありません<br>外で飲んだ一杯を記録しましょう</div>`;
+    return;
+  }
+  wrap.innerHTML = cafeNotes.map(c => `
+    <div class="card">
+      ${c.photo ? `<img class="latte-photo" src="${c.photo}" alt="cafe">` : ''}
+      <div class="card-top">
+        <div>
+          <div class="card-title">🏪 ${escapeHtml(c.shop)}</div>
+          <div class="card-date">${formatDate(c.date)}${c.menu ? ' • ' + escapeHtml(c.menu) : ''}</div>
+        </div>
+        <button class="del-btn" onclick="deleteCafe('${c.id}')">×</button>
+      </div>
+      ${c.flavor ? `<div class="memo-text">${escapeHtml(c.flavor)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+/* =========================================================
+   初期化
+========================================================= */
+updateBeanDatalist();
+renderBrewList();
+renderLatteList();
+renderCafeList();
+document.getElementById('headerSearchBtn').style.display = 'flex';
+document.getElementById('headerAnalysisBtn').style.display = 'flex';
+
+</script>
+</body>
+</html>
