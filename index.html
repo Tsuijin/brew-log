@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Brew Log">
 <meta name="theme-color" content="#121620">
 <!-- deploy.sh がデプロイ日時を焼き込む。curl して公開版の鮮度を確認するための印。 -->
-<meta name="app-version" content="2026-08-01 19:23">
+<meta name="app-version" content="2026-08-01 19:34">
 <style>
   :root {
     --bg-color: #121620;
@@ -338,7 +338,12 @@
   }
   input[type=range] {
     -webkit-appearance: none; width: 100%; height: 5px;
-    background: rgba(255,255,255,0.08); border-radius: 3px; outline:none;
+    border-radius: 3px; outline:none;
+    /* --fill は JS が現在値の割合(%)を入れる。掴んでいる間も軌道が追従する */
+    background: linear-gradient(to right,
+      var(--accent-color) 0%, var(--accent-color) var(--fill, 50%),
+      rgba(255,255,255,0.08) var(--fill, 50%), rgba(255,255,255,0.08) 100%);
+    transition: background .06s linear;
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%;
@@ -360,6 +365,49 @@
   /* 値が変わった瞬間に一度だけ跳ねる */
   @keyframes valuePop { 0% { transform: scale(1); } 40% { transform: scale(1.35); } 100% { transform: scale(1); } }
   .pop { animation: valuePop .22s cubic-bezier(.34,1.56,.64,1); }
+
+  /* ★は左から順に点灯させる */
+  @keyframes starPop { 0% { transform: scale(1); } 45% { transform: scale(1.5); } 100% { transform: scale(1); } }
+
+  /* 押した位置から広がる波紋 */
+  .ripple {
+    position: absolute;
+    border-radius: 50%;
+    background: var(--ripple-color, rgba(255,255,255,0.3));
+    transform: scale(0);
+    pointer-events: none;
+    animation: rippleOut .55s cubic-bezier(.22,1,.36,1) forwards;
+  }
+  @keyframes rippleOut { to { transform: scale(2.5); opacity: 0; } }
+  /* 波紋を要素内に収めるための下地。
+     .swipe-delete はここに入れないこと（自前の position:absolute を潰してしまう）。 */
+  .add-btn, .save-btn, .method-card, .ai-btn, .nav-item {
+    position: relative;
+    overflow: hidden;
+  }
+  .swipe-delete { overflow: hidden; }
+  /* .header-icon-btn は入れない。フィルタ中を示す .dot がボタンの外側にあり、
+     overflow:hidden にすると切れてしまう。押下時の縮小だけで手応えは足りる。 */
+  /* 明るいボタンの上では暗い波紋、暗いボタンの上ではアクセント色 */
+  .add-btn, .save-btn, .swipe-delete { --ripple-color: rgba(0,0,0,0.16); }
+  .method-card, .ai-btn, .nav-item { --ripple-color: rgba(209,154,102,0.3); }
+
+  /* 保存・削除の結果を短く知らせる */
+  .toast {
+    position: fixed; left: 50%; z-index: 95;
+    bottom: calc(84px + var(--safe-bottom));
+    transform: translate(-50%, 14px);
+    background: var(--card-bg-2);
+    color: var(--text-color);
+    border: 1px solid var(--border-color);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    padding: 11px 20px;
+    border-radius: 999px;
+    font-size: 13px; font-weight: 700;
+    opacity: 0; pointer-events: none;
+    transition: opacity .22s ease, transform .22s cubic-bezier(.34,1.56,.64,1);
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
 
   .segmented { display:flex; background: var(--card-bg); border:1px solid var(--border-color); border-radius: 10px; padding: 3px; gap: 3px; margin-bottom: 14px; }
   .segmented button {
@@ -497,7 +545,9 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) {
     .spinner { animation-duration: 2.4s; }
-    .pop { animation: none; }
+    .pop, .ripple { animation: none; }
+    .ripple { display: none; }
+    .toast { transition: opacity .15s; transform: translate(-50%, 0); }
     .add-btn, .save-btn, .method-card, .header-icon-btn, .ai-btn, .modal-close,
     .nav-icon, .star-input span, input[type=range]::-webkit-slider-thumb { transition: none; }
   }
@@ -647,6 +697,8 @@
 <div class="lightbox" id="lightbox" onclick="closeLightbox()">
   <img id="lightboxImg" src="" alt="">
 </div>
+
+<div class="toast" id="toast"></div>
 
 <!-- ========= モーダル: ログ検索 ========= -->
 <div class="modal-overlay" id="modalSearch">
@@ -844,6 +896,56 @@ function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
 /* =========================================================
+   操作の手応え（波紋・トースト・スライダーの塗り）
+========================================================= */
+const RIPPLE_TARGETS = '.add-btn, .save-btn, .method-card, .swipe-delete, .ai-btn, .nav-item';
+
+// 押した場所から波紋を出す。要素側は overflow:hidden で切り取る。
+document.addEventListener('pointerdown', (e) => {
+  const host = e.target.closest(RIPPLE_TARGETS);
+  if (!host || host.disabled) return;
+
+  const rect = host.getBoundingClientRect();
+  const size = Math.max(rect.width, rect.height);
+  const dot = document.createElement('span');
+  dot.className = 'ripple';
+  dot.style.width = dot.style.height = `${size}px`;
+  dot.style.left = `${e.clientX - rect.left - size / 2}px`;
+  dot.style.top = `${e.clientY - rect.top - size / 2}px`;
+  // animationend だけに任せると、アニメーションを切っている環境
+  // （prefers-reduced-motion / 非表示タブ）でノードが残り続ける
+  const drop = () => { clearTimeout(timer); dot.remove(); };
+  const timer = setTimeout(drop, 700);
+  dot.addEventListener('animationend', drop);
+  host.appendChild(dot);
+});
+
+let toastTimer = null;
+/** 画面下に短いメッセージを出す */
+function showToast(message) {
+  const el = document.getElementById('toast');
+  el.textContent = message;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 1900);
+}
+
+/** スライダーの軌道の塗り具合を現在値に合わせる */
+function updateRangeFill(el) {
+  const min = Number(el.min || 0), max = Number(el.max || 100);
+  const pct = max === min ? 0 : ((Number(el.value) - min) / (max - min)) * 100;
+  el.style.setProperty('--fill', `${pct}%`);
+}
+/** 指定要素の配下にある全スライダーの塗りを引き直す */
+function refreshRangeFills(root) {
+  (root || document).querySelectorAll('input[type=range]').forEach(updateRangeFill);
+}
+// 描画のたびに呼ばなくて済むよう、入力は委譲で拾う
+document.addEventListener('input', (e) => {
+  if (e.target.type === 'range') updateRangeFill(e.target);
+});
+
+/* =========================================================
    豆（Bean）
    ログ側は beanId で豆を参照しつつ、表示名 beanName も持たせている。
    beanName を持たせるのは、豆マスタが無い旧ログや、豆を消したあとのログでも
@@ -960,6 +1062,7 @@ function startBeanForm(id) {
   updateShopDatalist();
   renderRoastScale();
   renderBeanPhotoGrid();
+  refreshRangeFills(document.getElementById('beanFormBody'));
   openModal('modalBeanForm');
 }
 
@@ -1181,8 +1284,10 @@ function saveBean() {
   // 豆名が変わっている可能性があるので、参照しているログの表示名を貼り直す
   syncLogBeanNames();
 
+  const wasEdit = !!editingBeanId;
   editingBeanId = null;
   closeModal('modalBeanForm');
+  showToast(wasEdit ? '豆を更新しました' : '豆を登録しました');
   renderBeanList();
   updateBeanDatalist();
   renderBrewList();
@@ -1206,6 +1311,7 @@ function deleteBean(id) {
   // ログ側の beanName は残したまま、リンクだけ切る
   brewLogs.forEach(l => { if (l.beanId === id) delete l.beanId; });
   saveData(LS_KEYS.brew, brewLogs);
+  showToast('豆を削除しました');
   renderBeanList();
   updateBeanDatalist();
   renderBrewList();
@@ -1270,6 +1376,7 @@ function openBrewForm(method, log) {
   document.getElementById('brewFormBody').innerHTML = buildBrewFormHtml(method, log);
   overallRating.value = log ? Number(log.rating || 0) : 0;
   initStarInput('overallStars', overallRating);
+  refreshRangeFills(document.getElementById('brewFormBody'));
   openModal('modalBrewForm');
 }
 
@@ -1462,7 +1569,15 @@ function initStarInput(containerId, hiddenValueRef) {
     if (i <= Number(hiddenValueRef.value || 0)) s.classList.add('on');
     s.onclick = () => {
       hiddenValueRef.value = i;
-      Array.from(el.children).forEach(c => c.classList.toggle('on', Number(c.dataset.val) <= i));
+      Array.from(el.children).forEach((c, idx) => {
+        const on = idx < i;
+        c.classList.toggle('on', on);
+        // 点いた星だけ、左から少しずつ遅らせて跳ねさせる
+        if (!on) { c.style.animation = ''; return; }
+        c.style.animation = 'none';
+        void c.offsetWidth;
+        c.style.animation = `starPop .3s ${idx * 0.045}s cubic-bezier(.34,1.56,.64,1)`;
+      });
     };
     el.appendChild(s);
   }
@@ -1518,6 +1633,7 @@ function saveBrewLog() {
 
   if (!log.beanId) delete log.beanId;
 
+  const wasEdit = !!editingLogId;
   if (editingLogId) {
     const idx = brewLogs.findIndex(l => l.id === editingLogId);
     if (idx >= 0) brewLogs[idx] = log;
@@ -1529,6 +1645,7 @@ function saveBrewLog() {
   saveData(LS_KEYS.brew, brewLogs);
   updateBeanDatalist();
   closeModal('modalBrewForm');
+  showToast(wasEdit ? '記録を更新しました' : '記録を保存しました');
   renderBrewList();
 }
 
@@ -1537,6 +1654,7 @@ function deleteBrewLog(id) {
   brewLogs = brewLogs.filter(l => l.id !== id);
   saveData(LS_KEYS.brew, brewLogs);
   updateBeanDatalist();
+  showToast('記録を削除しました');
   renderBrewList();
 }
 
