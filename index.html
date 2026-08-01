@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Brew Log">
 <meta name="theme-color" content="#121620">
 <!-- deploy.sh がデプロイ日時を焼き込む。curl して公開版の鮮度を確認するための印。 -->
-<meta name="app-version" content="2026-08-01 15:58">
+<meta name="app-version" content="2026-08-01 16:05">
 <style>
   :root {
     --bg-color: #121620;
@@ -145,7 +145,8 @@
 
   /* 焙煎度スライダーの目盛り */
   .roast-scale { display: flex; margin-top: 6px; }
-  .roast-scale span { flex: 1; text-align: center; font-size: 10px; color: var(--sub-text); }
+  /* 7段階×4文字。iPhone SE 幅(320px)でも隣とくっつかないサイズ */
+  .roast-scale span { flex: 1; text-align: center; font-size: 9px; color: var(--sub-text); }
   .roast-scale span.on { color: var(--accent-color); font-weight: 700; }
 
   /* 豆情報の定義リスト */
@@ -713,7 +714,27 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
    集計（MYレシピ・分析・検索）がそのまま動くようにするため。
    豆を編集したら、参照しているログの beanName を貼り直す（syncLogBeanNames）。
 ========================================================= */
-const ROAST_LEVELS = ['浅煎り', '中煎り', '中深煎り', '深煎り', '極深煎り'];
+// 中煎り（index 3）が真ん中に来る7段階
+const ROAST_LEVELS = ['極浅煎り', '浅煎り', '中浅煎り', '中煎り', '中深煎り', '深煎り', '極深煎り'];
+const ROAST_DEFAULT = ROAST_LEVELS.indexOf('中煎り');
+
+// 旧5段階の並び。当時は index を保存していたので、ラベルに読み替えて移行する。
+const ROAST_LEVELS_V1 = ['浅煎り', '中煎り', '中深煎り', '深煎り', '極深煎り'];
+
+/** roastLevel を index 保存からラベル保存へ移行する（初回読み込み時に一度だけ効く） */
+function migrateBeanRoastLevels() {
+  let changed = false;
+  beans.forEach(b => {
+    if (typeof b.roastLevel === 'string' && /^\d+$/.test(b.roastLevel)) {
+      b.roastLevel = ROAST_LEVELS_V1[Number(b.roastLevel)] || '';
+      changed = true;
+    } else if (typeof b.roastLevel === 'number') {
+      b.roastLevel = ROAST_LEVELS_V1[b.roastLevel] || '';
+      changed = true;
+    }
+  });
+  if (changed) saveData(LS_KEYS.bean, beans);
+}
 
 /** 豆の表示名。「銘柄名(生産国) - 購入店」。無い項目は省略する。 */
 function beanLabel(bean) {
@@ -753,7 +774,7 @@ function renderBeanList() {
           <button class="del-btn" onclick="deleteBean('${b.id}')">×</button>
         </div>
       </div>
-      ${b.roastLevel !== undefined && b.roastLevel !== '' ? `<span class="badge">${ROAST_LEVELS[Number(b.roastLevel)]}</span>` : ''}
+      ${b.roastLevel ? `<span class="badge">${escapeHtml(b.roastLevel)}</span>` : ''}
       ${beanSpecHtml(b)}
     </div>
   `).join('');
@@ -767,7 +788,7 @@ function beanSpecHtml(b) {
     ['農園', b.farm],
     ['品種', b.variety],
     ['精製方法', b.process],
-    ['焙煎度', (b.roastLevel !== undefined && b.roastLevel !== '') ? ROAST_LEVELS[Number(b.roastLevel)] : ''],
+    ['焙煎度', b.roastLevel],
     ['焙煎日', b.roastDate ? formatDate(b.roastDate) : ''],
     ['購入日', b.buyDate ? formatDate(b.buyDate) : ''],
   ].filter(([, v]) => v);
@@ -790,7 +811,7 @@ function startBeanForm(id) {
 
 function buildBeanFormHtml(b) {
   const v = (key) => escapeHtml(b && b[key] !== undefined ? b[key] : '');
-  const roast = (b && b.roastLevel !== undefined && b.roastLevel !== '') ? Number(b.roastLevel) : 1;
+  const roastIdx = b && ROAST_LEVELS.indexOf(b.roastLevel) >= 0 ? ROAST_LEVELS.indexOf(b.roastLevel) : ROAST_DEFAULT;
   return `
     <div class="form-group">
       <label class="form-label">購入店（過去の入力から選択 or 直接入力）</label>
@@ -822,7 +843,7 @@ function buildBeanFormHtml(b) {
     </div>
     <div class="form-group">
       <label class="form-label">焙煎度</label>
-      <input type="range" min="0" max="4" step="1" value="${roast}" id="b_roastLevel" oninput="renderRoastScale()">
+      <input type="range" min="0" max="${ROAST_LEVELS.length - 1}" step="1" value="${roastIdx}" id="b_roastLevel" oninput="renderRoastScale()">
       <div class="roast-scale" id="roastScale"></div>
     </div>
     <div class="form-row">
@@ -865,7 +886,7 @@ function saveBean() {
     farm: document.getElementById('b_farm').value.trim(),
     variety: document.getElementById('b_variety').value.trim(),
     process: document.getElementById('b_process').value.trim(),
-    roastLevel: document.getElementById('b_roastLevel').value,
+    roastLevel: ROAST_LEVELS[Number(document.getElementById('b_roastLevel').value)] || '',
     roastDate: document.getElementById('b_roastDate').value,
     buyDate: document.getElementById('b_buyDate').value,
   };
@@ -1505,7 +1526,7 @@ function aiBeanPayload(logs) {
     farm: bean.farm || '',
     variety: bean.variety || '',
     process: bean.process || '',
-    roastLevel: (bean.roastLevel !== undefined && bean.roastLevel !== '') ? ROAST_LEVELS[Number(bean.roastLevel)] : '',
+    roastLevel: bean.roastLevel || '',
     roastDate: bean.roastDate || '',
     buyDate: bean.buyDate || '',
   };
@@ -1801,6 +1822,7 @@ function renderCafeList() {
 /* =========================================================
    初期化
 ========================================================= */
+migrateBeanRoastLevels();
 updateBeanDatalist();
 updateShopDatalist();
 renderBrewList();
