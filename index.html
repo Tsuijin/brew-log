@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Brew Log">
 <meta name="theme-color" content="#121620">
 <!-- deploy.sh がデプロイ日時を焼き込む。curl して公開版の鮮度を確認するための印。 -->
-<meta name="app-version" content="2026-08-01 16:20">
+<meta name="app-version" content="2026-08-01 18:47">
 <style>
   :root {
     --bg-color: #121620;
@@ -298,6 +298,10 @@
   .form-row3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; }
   input[type=text], input[type=number], input[type=datetime-local], input[type=date], textarea, select {
     width: 100%;
+    /* grid の子は min-width:auto が既定。iOS の date 入力は固有幅が広く、
+       これが無いと 2カラムの枠からはみ出して隣と重なる。 */
+    min-width: 0;
+    max-width: 100%;
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     color: var(--text-color);
@@ -306,6 +310,14 @@
     font-size: 14.5px;
     font-family: inherit;
   }
+  /* iOS Safari は date/datetime を独自幅で描くので、明示的に枠へ収める */
+  input[type=date], input[type=datetime-local] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+  }
+  .form-row, .form-row3 { min-width: 0; }
+  .form-row > .form-group, .form-row3 > .form-group { min-width: 0; }
   textarea { resize: vertical; min-height: 60px; }
   input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent-color); }
   ::placeholder { color: #545E6E; }
@@ -370,6 +382,48 @@
   }
   .photo-picker img { width:100%; border-radius: 10px; margin-bottom: 10px; max-height: 220px; object-fit:cover; }
   .photo-picker .p-icon { font-size: 26px; margin-bottom: 6px; display:block; }
+  .photo-picker { transition: border-color .12s, background-color .12s; }
+  .photo-picker:active { border-color: var(--accent-color); background: var(--card-bg); }
+
+  /* 豆の写真（複数枚） */
+  .photo-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .photo-thumb {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+  }
+  .photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; cursor: pointer; }
+  .photo-thumb .rm {
+    position: absolute; top: 4px; right: 4px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(6,8,12,0.72); color: #fff;
+    border: none; font-size: 13px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: transform .12s cubic-bezier(.34,1.56,.64,1);
+  }
+  .photo-thumb .rm:active { transform: scale(0.82); background: var(--danger); }
+
+  /* 豆情報モーダルでの写真表示 */
+  .bean-photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0 4px; }
+  .bean-photos img { width: 100%; aspect-ratio: 1/1; object-fit: cover; border-radius: 10px; display: block; }
+
+  /* 写真の拡大表示 */
+  .lightbox {
+    position: fixed; inset: 0; z-index: 90;
+    background: rgba(6,8,12,0.92);
+    display: none; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 100%; max-height: 100%; border-radius: 12px; }
 
   /* ボトムナビ */
   .nav-bar {
@@ -586,6 +640,11 @@
     </div>
     <div id="beanInfoBody"></div>
   </div>
+</div>
+
+<!-- ========= 写真の拡大表示 ========= -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+  <img id="lightboxImg" src="" alt="">
 </div>
 
 <!-- ========= モーダル: ログ検索 ========= -->
@@ -812,17 +871,14 @@ function migrateBeanRoastLevels() {
   if (changed) saveData(LS_KEYS.bean, beans);
 }
 
-/** 豆の表示名。「銘柄名(生産国) - 購入店」。無い項目は省略する。 */
+/** 豆の選択・管理で出す名前。「銘柄名 - 購入店」。 */
 function beanLabel(bean) {
   if (!bean) return '';
-  const origin = bean.origin ? `(${bean.origin})` : '';
-  const shop = bean.shop ? ` - ${bean.shop}` : '';
-  return `${bean.name}${origin}${shop}`;
-}
-/** ログのカードに出す短い名前。「銘柄名 - 購入店」。生産国は省く。 */
-function beanLabelShort(bean) {
-  if (!bean) return '';
   return `${bean.name}${bean.shop ? ` - ${bean.shop}` : ''}`;
+}
+/** 抽出画面のカードに出す名前。銘柄名だけ。 */
+function beanLabelShort(bean) {
+  return bean ? bean.name : '';
 }
 function findBean(id) { return beans.find(b => b.id === id) || null; }
 
@@ -856,9 +912,18 @@ function renderBeanList() {
         </div>
       </div>
       ${b.roastLevel ? `<span class="badge">${escapeHtml(b.roastLevel)}</span>` : ''}
+      ${beanPhotosHtml(b)}
       ${beanSpecHtml(b)}
     </div>
   `).join('');
+}
+
+/** 登録済みの写真をタップで拡大できる形で並べる */
+function beanPhotosHtml(b) {
+  if (!Array.isArray(b.photos) || !b.photos.length) return '';
+  return `<div class="bean-photos">${b.photos.map((src, i) =>
+    `<img src="${src}" alt="${escapeHtml(b.name)}の写真${i + 1}" onclick="openLightboxSrc(this.src)">`
+  ).join('')}</div>`;
 }
 
 function beanSpecHtml(b) {
@@ -883,10 +948,12 @@ let editingBeanId = null;
 function startBeanForm(id) {
   editingBeanId = id || null;
   const b = id ? findBean(id) : null;
+  beanFormPhotos = (b && Array.isArray(b.photos)) ? b.photos.slice() : [];
   document.getElementById('beanFormTitle').textContent = b ? '豆を編集' : '豆を登録';
   document.getElementById('beanFormBody').innerHTML = buildBeanFormHtml(b);
   updateShopDatalist();
   renderRoastScale();
+  renderBeanPhotoGrid();
   openModal('modalBeanForm');
 }
 
@@ -937,8 +1004,98 @@ function buildBeanFormHtml(b) {
         <input type="date" id="b_buyDate" value="${v('buyDate')}">
       </div>
     </div>
+    <div class="form-group">
+      <label class="form-label">写真（パッケージ・豆など。複数可）</label>
+      <div class="photo-grid" id="beanPhotoGrid"></div>
+      <label class="photo-picker" id="beanPhotoPicker">
+        <span class="p-icon">📷</span>
+        <span>タップして写真を追加</span>
+        <input type="file" accept="image/*" multiple id="b_photoFile" style="display:none" onchange="onBeanPhotoChange(event)">
+      </label>
+    </div>
     <button class="save-btn" onclick="saveBean()">保存する</button>
   `;
+}
+
+/* ---------------------------------------------------------
+   豆の写真
+   localStorage は数MBしか無いので、原寸のまま入れると
+   数枚で容量を使い切る。必ず縮小してから持つ。
+--------------------------------------------------------- */
+const PHOTO_MAX_EDGE = 1000;   // 長辺の上限(px)
+const PHOTO_QUALITY = 0.72;    // JPEG 品質
+const PHOTO_MAX_COUNT = 9;
+
+let beanFormPhotos = [];
+
+/** 画像ファイルを縮小して data URL にする */
+function downscaleImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('読み込みに失敗しました'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('画像として開けませんでした'));
+      img.onload = () => {
+        const scale = Math.min(1, PHOTO_MAX_EDGE / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', PHOTO_QUALITY));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function onBeanPhotoChange(event) {
+  const files = Array.from(event.target.files || []);
+  event.target.value = ''; // 同じ写真を続けて選べるようにする
+  if (!files.length) return;
+
+  const room = PHOTO_MAX_COUNT - beanFormPhotos.length;
+  if (room <= 0) { alert(`写真は${PHOTO_MAX_COUNT}枚までです`); return; }
+
+  for (const file of files.slice(0, room)) {
+    try {
+      beanFormPhotos.push(await downscaleImage(file));
+    } catch (err) {
+      alert(`写真を追加できませんでした: ${err.message}`);
+    }
+  }
+  if (files.length > room) alert(`写真は${PHOTO_MAX_COUNT}枚までのため、${room}枚だけ追加しました`);
+  renderBeanPhotoGrid();
+}
+
+function removeBeanPhoto(index) {
+  beanFormPhotos.splice(index, 1);
+  renderBeanPhotoGrid();
+}
+
+function renderBeanPhotoGrid() {
+  const grid = document.getElementById('beanPhotoGrid');
+  if (!grid) return;
+  grid.innerHTML = beanFormPhotos.map((src, i) => `
+    <div class="photo-thumb">
+      <img src="${src}" alt="豆の写真${i + 1}" onclick="openLightbox(${i})">
+      <button type="button" class="rm" onclick="removeBeanPhoto(${i})">×</button>
+    </div>
+  `).join('');
+}
+
+function openLightbox(index) {
+  document.getElementById('lightboxImg').src = beanFormPhotos[index];
+  document.getElementById('lightbox').classList.add('open');
+}
+function openLightboxSrc(src) {
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightbox').classList.add('open');
+}
+function closeLightbox() {
+  document.getElementById('lightbox').classList.remove('open');
+  document.getElementById('lightboxImg').src = '';
 }
 
 function renderRoastScale() {
@@ -993,8 +1150,11 @@ function saveBean() {
     roastLevel: ROAST_LEVELS[Number(document.getElementById('b_roastLevel').value)] || '',
     roastDate: document.getElementById('b_roastDate').value,
     buyDate: document.getElementById('b_buyDate').value,
+    photos: beanFormPhotos.slice(),
   };
 
+  // 写真を積むと localStorage の上限に当たりうるので、失敗したら元に戻す
+  const snapshot = beans.slice();
   let savedId;
   if (editingBeanId) {
     savedId = editingBeanId;
@@ -1004,7 +1164,13 @@ function saveBean() {
     savedId = uid();
     beans.unshift({ id: savedId, ...data });
   }
-  saveData(LS_KEYS.bean, beans);
+  try {
+    saveData(LS_KEYS.bean, beans);
+  } catch (err) {
+    beans = snapshot;
+    alert('保存できませんでした。端末の保存容量が上限に達しています。\n写真を減らすか、古い豆を削除してください。');
+    return;
+  }
 
   // 豆名が変わっている可能性があるので、参照しているログの表示名を貼り直す
   syncLogBeanNames();
@@ -1055,6 +1221,7 @@ function openBeanInfo(beanId) {
   if (!b) return;
   document.getElementById('beanInfoBody').innerHTML = `
     <div class="card-title" style="margin-bottom:4px;">🫘 ${escapeHtml(beanLabel(b))}</div>
+    ${beanPhotosHtml(b)}
     ${beanSpecHtml(b)}
     <button class="save-btn" onclick="closeModal('modalBeanInfo'); startBeanForm('${b.id}')">この豆を編集</button>
   `;
@@ -1065,6 +1232,11 @@ function openBeanInfo(beanId) {
    抽出ログ（Brew Log）
 ========================================================= */
 function openMethodModal() { openModal('modalMethod'); }
+
+// 味のフィードバックは 1〜9（5がちょうど真ん中）。以前は 1〜10 だった。
+const TASTE_MIN = 1;
+const TASTE_MAX = 9;
+const TASTE_DEFAULT = 5;
 
 let currentMethod = 'drip';
 let editingLogId = null;
@@ -1137,7 +1309,10 @@ function onBeanSelectChange(sel) {
 function buildBrewFormHtml(method, log) {
   // 編集時は既存値、新規時は空。数値も文字列として扱う（そのまま value に入れる）
   const v = (key) => escapeHtml(log && log[key] !== undefined && log[key] !== null ? log[key] : '');
-  const range = (key) => (log && log[key] !== undefined && log[key] !== '') ? Number(log[key]) : 5;
+  // 1〜10 だった頃の記録が残っているので、上限に丸めてから出す
+  const range = (key) => (log && log[key] !== undefined && log[key] !== '')
+    ? Math.min(TASTE_MAX, Math.max(TASTE_MIN, Number(log[key])))
+    : TASTE_DEFAULT;
 
   let methodFields = '';
   if (method === 'drip') {
@@ -1240,19 +1415,19 @@ function buildBrewFormHtml(method, log) {
       <label class="form-label">出来栄え&フィードバック</label>
       <div class="range-group">
         <div class="range-top"><span>酸味</span><b id="v_acidity">${range('acidity')}</b></div>
-        <input type="range" min="1" max="10" value="${range('acidity')}" id="r_acidity" oninput="setRangeValue('v_acidity', this.value)">
+        <input type="range" min="${TASTE_MIN}" max="${TASTE_MAX}" value="${range('acidity')}" id="r_acidity" oninput="setRangeValue('v_acidity', this.value)">
       </div>
       <div class="range-group">
         <div class="range-top"><span>苦味</span><b id="v_bitterness">${range('bitterness')}</b></div>
-        <input type="range" min="1" max="10" value="${range('bitterness')}" id="r_bitterness" oninput="setRangeValue('v_bitterness', this.value)">
+        <input type="range" min="${TASTE_MIN}" max="${TASTE_MAX}" value="${range('bitterness')}" id="r_bitterness" oninput="setRangeValue('v_bitterness', this.value)">
       </div>
       <div class="range-group">
         <div class="range-top"><span>甘み</span><b id="v_sweetness">${range('sweetness')}</b></div>
-        <input type="range" min="1" max="10" value="${range('sweetness')}" id="r_sweetness" oninput="setRangeValue('v_sweetness', this.value)">
+        <input type="range" min="${TASTE_MIN}" max="${TASTE_MAX}" value="${range('sweetness')}" id="r_sweetness" oninput="setRangeValue('v_sweetness', this.value)">
       </div>
       <div class="range-group">
         <div class="range-top"><span>ボディ</span><b id="v_body">${range('body')}</b></div>
-        <input type="range" min="1" max="10" value="${range('body')}" id="r_body" oninput="setRangeValue('v_body', this.value)">
+        <input type="range" min="${TASTE_MIN}" max="${TASTE_MAX}" value="${range('body')}" id="r_body" oninput="setRangeValue('v_body', this.value)">
       </div>
     </div>
 
@@ -1396,7 +1571,7 @@ function tasteBarsHtml(log) {
   return `<div class="taste-bars">${rows.map(([label, val]) => `
     <div class="taste-row">
       <span class="t-label">${label}</span>
-      <div class="taste-track"><div class="taste-fill" style="width:${(Number(val || 0) / 10) * 100}%"></div></div>
+      <div class="taste-track"><div class="taste-fill" style="width:${Math.min(100, (Number(val || 0) / TASTE_MAX) * 100)}%"></div></div>
     </div>`).join('')}</div>`;
 }
 
@@ -2008,6 +2183,8 @@ function renderCafeList() {
    初期化
 ========================================================= */
 migrateBeanRoastLevels();
+// 表示名の書式を変えたときに、保存済みログの beanName を現行の書式へ揃える
+syncLogBeanNames();
 updateBeanDatalist();
 updateShopDatalist();
 renderBrewList();
