@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Brew Log">
 <meta name="theme-color" content="#121620">
 <!-- deploy.sh がデプロイ日時を焼き込む。curl して公開版の鮮度を確認するための印。 -->
-<meta name="app-version" content="2026-08-01 14:05">
+<meta name="app-version" content="2026-08-01 15:58">
 <style>
   :root {
     --bg-color: #121620;
@@ -1489,9 +1489,31 @@ function renderAnalysisResult() {
    AIアドバイス（オンライン時のみ。統計分析は常にそのまま残る）
 ========================================================= */
 
-/** ログの内容が1件でも変われば別キーになるハッシュ */
+/**
+ * その豆・その抽出方法のログ群から、AI に渡す豆情報を作る。
+ * 豆マスタに紐づいていないログ（旧データ）は null。
+ * 焙煎度は数値のままだと AI に伝わらないのでラベルに直す。
+ */
+function aiBeanPayload(logs) {
+  const withBean = logs.find(l => l.beanId);
+  const bean = withBean ? findBean(withBean.beanId) : null;
+  if (!bean) return null;
+  return {
+    shop: bean.shop || '',
+    name: bean.name || '',
+    origin: bean.origin || '',
+    farm: bean.farm || '',
+    variety: bean.variety || '',
+    process: bean.process || '',
+    roastLevel: (bean.roastLevel !== undefined && bean.roastLevel !== '') ? ROAST_LEVELS[Number(bean.roastLevel)] : '',
+    roastDate: bean.roastDate || '',
+    buyDate: bean.buyDate || '',
+  };
+}
+
+/** ログか豆情報が1つでも変われば別キーになるハッシュ */
 function aiCacheKey(beanName, method, logs) {
-  const src = JSON.stringify([beanName, method, logs]);
+  const src = JSON.stringify([beanName, method, logs, aiBeanPayload(logs)]);
   let h = 5381;
   for (let i = 0; i < src.length; i++) h = ((h * 33) ^ src.charCodeAt(i)) >>> 0;
   return `${method}:${h.toString(36)}`;
@@ -1565,7 +1587,7 @@ async function requestAiAdvice(method) {
     const res = await fetch(AI_API_BASE + '/api/recommend', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ beanName, method, logs }),
+      body: JSON.stringify({ beanName, method, logs, bean: aiBeanPayload(logs) }),
       signal: controller.signal,
     });
     const payload = await res.json().catch(() => ({}));
