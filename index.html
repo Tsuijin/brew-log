@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Brew Log">
 <meta name="theme-color" content="#121620">
 <!-- deploy.sh がデプロイ日時を焼き込む。curl して公開版の鮮度を確認するための印。 -->
-<meta name="app-version" content="2026-08-01 19:34">
+<meta name="app-version" content="2026-08-02 11:11">
 <style>
   :root {
     --bg-color: #121620;
@@ -25,7 +25,9 @@
     --safe-top: env(safe-area-inset-top, 0px);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-  html, body { height: 100%; }
+  /* height:100% だと body と .app-container が画面高さに固定され、
+     中身がそこからはみ出して padding-bottom が効かなくなる（最後のカードがナビに隠れる）。 */
+  html, body { min-height: 100%; }
   body {
     background-color: var(--bg-color);
     background-image:
@@ -36,16 +38,21 @@
     display: flex;
     justify-content: center;
     min-height: 100vh;
+    min-height: 100dvh;
     overscroll-behavior-y: none;
   }
   .app-container {
     width: 100%;
     max-width: 480px;
     min-height: 100vh;
+    /* iOS Safari の 100vh は下部ツールバー込みの高さなので、
+       対応ブラウザでは実際の表示領域を使う */
+    min-height: 100dvh;
     display: flex;
     flex-direction: column;
     position: relative;
-    padding-bottom: calc(70px + var(--safe-bottom));
+    /* ナビの実測高さは 63px + セーフエリア。隠れないよう余裕をとる */
+    padding-bottom: calc(88px + var(--safe-bottom));
   }
   header {
     padding: calc(18px + var(--safe-top)) 20px 12px;
@@ -489,6 +496,14 @@
     display: flex; flex-direction: column; align-items: center; gap: 3px;
     color: var(--sub-text); font-size: 10px; text-decoration: none;
     padding: 10px 0; flex:1; background:none; border:none; font-family:inherit;
+    /* 5タブなので 320px 幅では1枠64px。ラベルを折り返させない */
+    min-width: 0; white-space: nowrap;
+  }
+  @media (max-width: 360px) { .nav-item { font-size: 9px; } }
+
+  .settings-note {
+    font-size: 11.5px; color: var(--sub-text); line-height: 1.6;
+    margin-bottom: 16px;
   }
   .nav-item.active { color: var(--accent-color); }
   .nav-icon { font-size: 18px; transition: transform .16s cubic-bezier(.34,1.56,.64,1); }
@@ -600,6 +615,16 @@
       <div id="cafeList"></div>
     </section>
 
+    <!-- ============ 設定 ============ -->
+    <section class="tab-view" id="view-settings">
+      <div class="section-title">MY EQUIPMENT</div>
+      <div class="settings-note">
+        登録した機材は AI アドバイスに前提として渡されます。<br>
+        器具の癖を踏まえた提案になりますが、判断の主役はあくまで過去ログです。
+      </div>
+      <div id="settingsBody"></div>
+    </section>
+
   </main>
 
   <nav class="nav-bar">
@@ -614,6 +639,9 @@
     </button>
     <button class="nav-item" data-tab="cafe" onclick="switchTab('cafe')">
       <span class="nav-icon">🏪</span><span>カフェ</span>
+    </button>
+    <button class="nav-item" data-tab="settings" onclick="switchTab('settings')">
+      <span class="nav-icon">⚙️</span><span>設定</span>
     </button>
   </nav>
 </div>
@@ -817,7 +845,7 @@
 /* =========================================================
    共通ユーティリティ
 ========================================================= */
-const LS_KEYS = { brew: 'bl_brewLogs', latte: 'bl_latteArts', cafe: 'bl_cafeNotes', aiCache: 'bl_aiCache', bean: 'bl_beans' };
+const LS_KEYS = { brew: 'bl_brewLogs', latte: 'bl_latteArts', cafe: 'bl_cafeNotes', aiCache: 'bl_aiCache', bean: 'bl_beans', settings: 'bl_settings' };
 
 /* -----------------------------------------------------------
    AIアドバイス連携の設定
@@ -837,6 +865,24 @@ let brewLogs = loadData(LS_KEYS.brew);
 let latteArts = loadData(LS_KEYS.latte);
 let cafeNotes = loadData(LS_KEYS.cafe);
 let beans = loadData(LS_KEYS.bean);
+
+/* =========================================================
+   設定（使っている機材）
+   AI に前提として渡す。全項目とも任意で、空なら送られない。
+========================================================= */
+const EQUIPMENT_FIELDS = [
+  { key: 'espressoMachine', label: 'エスプレッソマシン', placeholder: '例）デロンギ デディカ アルテ' },
+  { key: 'dripper',         label: 'ドリッパー',         placeholder: '例）ハリオ V60' },
+  { key: 'grinder',         label: 'グラインダー',       placeholder: '例）コマンダンテ C40' },
+  { key: 'kettle',          label: 'ケトル',             placeholder: '例）フェロー スタッグ EKG' },
+  { key: 'other',           label: 'その他の機材・備考', placeholder: '例）フレンチプレスはボダム、軟水を使用' },
+];
+
+function loadSettings() {
+  try { return JSON.parse(localStorage.getItem(LS_KEYS.settings)) || {}; }
+  catch (e) { return {}; }
+}
+let settings = loadSettings();
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
@@ -890,6 +936,41 @@ function switchTab(name) {
   if (name === 'recipe') renderRecipeList();
   if (name === 'latte') renderLatteList();
   if (name === 'cafe') renderCafeList();
+  if (name === 'settings') renderSettings();
+}
+
+/* =========================================================
+   設定画面
+========================================================= */
+function renderSettings() {
+  document.getElementById('settingsBody').innerHTML = `
+    ${EQUIPMENT_FIELDS.map(f => `
+      <div class="form-group">
+        <label class="form-label">${f.label}</label>
+        <input type="text" id="set_${f.key}" value="${escapeHtml(settings[f.key] || '')}" placeholder="${f.placeholder}">
+      </div>
+    `).join('')}
+    <button class="save-btn" onclick="saveSettings()">保存する</button>
+  `;
+}
+
+function saveSettings() {
+  const next = {};
+  EQUIPMENT_FIELDS.forEach(f => {
+    const val = document.getElementById('set_' + f.key).value.trim();
+    if (val) next[f.key] = val;
+  });
+  settings = next;
+  localStorage.setItem(LS_KEYS.settings, JSON.stringify(settings));
+  // 機材が変わればアドバイスの前提も変わるので、キャッシュを作り直させる
+  showToast('機材を保存しました');
+}
+
+/** AI に渡す機材情報。何も登録が無ければ null。 */
+function equipmentPayload() {
+  const out = {};
+  EQUIPMENT_FIELDS.forEach(f => { if (settings[f.key]) out[f.key] = settings[f.key]; });
+  return Object.keys(out).length ? out : null;
 }
 
 function openModal(id) { document.getElementById(id).classList.add('open'); }
@@ -1673,9 +1754,9 @@ function brewParamsHtml(log) {
     </div>`;
   } else if (log.method === 'espresso') {
     return `<div class="params-grid">
-      <div class="param-item"><span class="param-label">In</span><span class="param-value">${escapeHtml(log.dose)}g</span></div>
-      <div class="param-item"><span class="param-label">Out</span><span class="param-value">${escapeHtml(log.yield)}g</span></div>
-      <div class="param-item"><span class="param-label">時間</span><span class="param-value">${escapeHtml(log.time)}秒</span></div>
+      <div class="param-item"><span class="param-label">豆量</span><span class="param-value">${escapeHtml(log.dose)}g</span></div>
+      <div class="param-item"><span class="param-label">抽出量</span><span class="param-value">${escapeHtml(log.yield)}g</span></div>
+      <div class="param-item"><span class="param-label">抽出時間</span><span class="param-value">${escapeHtml(log.time)}秒</span></div>
       <div class="param-item"><span class="param-label">湯温</span><span class="param-value">${escapeHtml(log.waterTemp)}</span></div>
       <div class="param-item"><span class="param-label">挽き目</span><span class="param-value">${escapeHtml(log.grind)}</span></div>
     </div>`;
@@ -1953,9 +2034,9 @@ function buildRecommendationCard(method, logs, beanName) {
     const yieldAmt = weightedAvgField(logs, 'yield');
     const timeSecs = weightedAvgField(logs, 'time');
     paramsHtml = `<div class="params-grid">
-      <div class="param-item"><span class="param-label">In</span><span class="param-value">${dose !== null ? dose.toFixed(1) + 'g' : '-'}</span></div>
-      <div class="param-item"><span class="param-label">Out</span><span class="param-value">${yieldAmt !== null ? yieldAmt.toFixed(1) + 'g' : '-'}</span></div>
-      <div class="param-item"><span class="param-label">時間</span><span class="param-value">${timeSecs !== null ? Math.round(timeSecs) + '秒' : '-'}</span></div>
+      <div class="param-item"><span class="param-label">豆量</span><span class="param-value">${dose !== null ? dose.toFixed(1) + 'g' : '-'}</span></div>
+      <div class="param-item"><span class="param-label">抽出量</span><span class="param-value">${yieldAmt !== null ? yieldAmt.toFixed(1) + 'g' : '-'}</span></div>
+      <div class="param-item"><span class="param-label">抽出時間</span><span class="param-value">${timeSecs !== null ? Math.round(timeSecs) + '秒' : '-'}</span></div>
       <div class="param-item"><span class="param-label">湯温</span><span class="param-value">${waterTemp ? escapeHtml(waterTemp) : '-'}</span></div>
       <div class="param-item"><span class="param-label">挽き目</span><span class="param-value">${grind ? escapeHtml(grind) : '-'}</span></div>
     </div>`;
@@ -2026,9 +2107,9 @@ function aiBeanPayload(logs) {
   };
 }
 
-/** ログか豆情報が1つでも変われば別キーになるハッシュ */
+/** ログ・豆情報・機材のどれかが変われば別キーになるハッシュ */
 function aiCacheKey(beanName, method, logs) {
-  const src = JSON.stringify([beanName, method, logs, aiBeanPayload(logs)]);
+  const src = JSON.stringify([beanName, method, logs, aiBeanPayload(logs), equipmentPayload()]);
   let h = 5381;
   for (let i = 0; i < src.length; i++) h = ((h * 33) ^ src.charCodeAt(i)) >>> 0;
   return `${method}:${h.toString(36)}`;
@@ -2066,8 +2147,8 @@ function aiResultHtml(data, cachedAt) {
     ? `<div class="param-item"><span class="param-label">${label}</span><span class="param-value">${escapeHtml(value)}</span></div>`
     : '';
   const params = [
-    cell('粉量', rec.dose), cell('湯量', rec.waterAmount), cell('抽出量', rec.yield),
-    cell('湯温', rec.waterTemp), cell('挽き目', rec.grind), cell('時間', rec.time),
+    cell('豆量', rec.dose), cell('湯量', rec.waterAmount), cell('抽出量', rec.yield),
+    cell('湯温', rec.waterTemp), cell('挽き目', rec.grind), cell('抽出時間', rec.time),
   ].join('');
   const note = cachedAt ? `<span class="ai-cached-note">${formatDateTime(new Date(cachedAt).toISOString())} の結果</span>` : '';
   return `
@@ -2102,7 +2183,7 @@ async function requestAiAdvice(method) {
     const res = await fetch(AI_API_BASE + '/api/recommend', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ beanName, method, logs, bean: aiBeanPayload(logs) }),
+      body: JSON.stringify({ beanName, method, logs, bean: aiBeanPayload(logs), equipment: equipmentPayload() }),
       signal: controller.signal,
     });
     const payload = await res.json().catch(() => ({}));
